@@ -1,11 +1,80 @@
 import gym
+# import numpy as np
 import pygame
+
+
+ANCHO = 1280
+ALTO = 700
+
+
+class Camara:
+    def __init__(self, entidad):
+        self.entidad = entidad
+        self.offset = pygame.Vector2()
+        self.offset_float = pygame.Vector2()
+        self.limites = pygame.Vector2(-ANCHO/3, -(7*64 - (704-ALTO)))  # 444  # - 700/1.57
+
+    def scroll(self):
+        self.offset_float += ((self.entidad.rect.x - self.offset_float.x + self.limites.x) / 16,
+                              (self.entidad.rect.y - self.offset_float.y + self.limites.y) / 8)
+        self.offset.x = max(0, round(self.offset_float.x))  # Borde izquierdo
+        self.offset.y = max(-64, round(self.offset_float.y))  # Borde superior
+        self.offset.y = min(0, self.offset.y)  # Borde inferior
+
+
+class SpatialHash(pygame.sprite.AbstractGroup):
+    def draw(self, surface, offset=pygame.Vector2()):
+        """draw all sprites onto the surface
+
+        Group.draw(surface): return Rect_list
+
+        Draws all of the member sprites onto the given surface.
+
+        """
+        sprites = self.sprites()
+        if hasattr(surface, "blits"):
+            self.spritedict.update(
+                zip(sprites, surface.blits((spr.image,
+                                            (spr.rect.x - offset.x, spr.rect.y - offset.y)) for spr in sprites))
+            )
+        else:
+            for spr in sprites:
+                self.spritedict[spr] = surface.blit(spr.image, spr.rect)
+        self.lostsprites = []
+        dirty = self.lostsprites
+
+        return dirty
+
+
+class SpatialHashSingle(pygame.sprite.GroupSingle):
+    def draw(self, surface, offset=pygame.Vector2()):
+        """draw all sprites onto the surface
+
+        Group.draw(surface): return Rect_list
+
+        Draws all of the member sprites onto the given surface.
+
+        """
+        sprites = self.sprites()
+        if hasattr(surface, "blits"):
+            self.spritedict.update(
+                zip(sprites, surface.blits((spr.image, (spr.rect.x-offset.x, spr.rect.y-offset.y)) for spr in sprites))
+            )
+        else:
+            print("Estoy pintando en un lugar inesperado!")
+            for spr in sprites:
+                self.spritedict[spr] = surface.blit(spr.image, spr.rect)
+        self.lostsprites = []
+        dirty = self.lostsprites
+
+        return dirty
 
 
 class Juego(gym.Env):
     def __init__(self):
         self.nivel = Nivel()
-        self.jugador = pygame.sprite.GroupSingle(Jugador(pygame.Vector2(64, 448), self.nivel))  # 64, 448
+        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 448), self.nivel))  # 64, 448
+        self.camara = Camara(self.jugador.sprite)
 
         self.ventana = None
         self.flag_iniciar_render = True
@@ -20,8 +89,10 @@ class Juego(gym.Env):
 
         self.ventana.fill('black')
 
-        self.nivel.draw(self.ventana)
-        self.jugador.draw(self.ventana)
+        self.camara.scroll()
+
+        self.nivel.draw(self.ventana, self.camara.offset)
+        self.jugador.draw(self.ventana, self.camara.offset)
 
         pygame.display.update()
 
@@ -37,20 +108,20 @@ class Juego(gym.Env):
 
 class Nivel:
     def __init__(self):
-        self.bloques = pygame.sprite.Group()
+        self.bloques = SpatialHash()  # pygame.sprite.Group()
 
         datos_nivel = [
-            "                    ",
-            "        X           ",
-            "                    ",
-            "                X   ",
-            "            X       ",
-            "    XXXXX           ",
-            "                    ",
+            "                         ",
+            "        X              XX",
+            "                        X",
+            "                XXX     X",
+            "            X           X",
+            "    XXXXX              X",
+            "                     XX",
             "                    X",
             "XXXXX  XXXXX    XXXX",
-            "XXXXXXXXXXXX  XXXXXX",
-            "XXXXXXXXXXXX  XXXXXX"
+            "XXX XXXXXXXX  XXXXXX",
+            "XX XXXXXXXXX  XXXXXX"
         ]
         tam_bloque = 64
 
@@ -71,8 +142,8 @@ class Nivel:
     def update(self, accion):
         pass
 
-    def draw(self, ventana):
-        self.bloques.draw(ventana)
+    def draw(self, ventana, offset):
+        self.bloques.draw(ventana, offset)
 
 
 class Sprite(pygame.sprite.Sprite):
