@@ -58,10 +58,11 @@ class SpatialHashSingle(pygame.sprite.GroupSingle):
         sprites = self.sprites()
         if hasattr(surface, "blits"):
             self.spritedict.update(
-                zip(sprites, surface.blits((spr.image, (spr.rect.x-offset.x, spr.rect.y-offset.y)) for spr in sprites))
+                zip(sprites, surface.blits((spr.image,
+                                            (spr.rect.x - offset.x, spr.rect.y - offset.y)) for spr in sprites))
             )
         else:
-            print("Estoy pintando en un lugar inesperado!")
+            # print("Estoy pintando en un lugar inesperado!")
             for spr in sprites:
                 self.spritedict[spr] = surface.blit(spr.image, spr.rect)
         self.lostsprites = []
@@ -74,8 +75,8 @@ class Juego(gym.Env):
     def __init__(self):
         self.nivel = Nivel()
         self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 448), self.nivel))  # 64, 448
-        self.camara = Camara(self.jugador.sprite)
 
+        self.camara = None
         self.ventana = None
         self.flag_iniciar_render = True
 
@@ -94,16 +95,20 @@ class Juego(gym.Env):
         self.nivel.draw(self.ventana, self.camara.offset)
         self.jugador.draw(self.ventana, self.camara.offset)
 
+        # pygame.draw.line(self.ventana, 'red', (ANCHO/2, 0), (ANCHO/2, ALTO))
+        # pygame.draw.line(self.ventana, 'red', (ANCHO / 3, 0), (ANCHO / 3, ALTO))
+
         pygame.display.update()
 
     def reset(self):
-        pass
+        self.jugador.sprite.reset()
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
 
         pygame.init()
         self.ventana = pygame.display.set_mode((1280, 700))
+        self.camara = Camara(self.jugador.sprite)
 
 
 class Nivel:
@@ -122,6 +127,20 @@ class Nivel:
             "XXXXX  XXXXX    XXXX",
             "XXX XXXXXXXX  XXXXXX",
             "XX XXXXXXXXX  XXXXXX"
+        ]
+
+        datos_nivel = [
+            "        X              XX",
+            "                        X",
+            "                XXX     X",
+            "            X           X",
+            "    XXXXX              X",
+            "                     XX",
+            "                    X",
+            "XXXXX  XXXX    XX  X",
+            "XXX XX         X  XX",
+            "XX      XXXX      XX",
+            "XXXXXXXXXXXX  XXXXXX"
         ]
         tam_bloque = 64
 
@@ -169,6 +188,7 @@ class Bloque(Sprite):
 class Entidad(Sprite):
     GRAVEDAD = 0.4
     VELOCIDAD_SALTO = -14  # -14
+    VELOCIDAD_DOBLE_SALTO = VELOCIDAD_SALTO * 0.75
 
     def __init__(self,
                  pos: pygame.Vector2,
@@ -182,7 +202,11 @@ class Entidad(Sprite):
 
         self.comprobar_colision_nivel = True
         self.saltando = False
+        self.doble_salto = False
         self.cayendo = False
+
+        self.frames_salto = 20
+        self.timer_salto = 0
 
     def mover(self, accion):
         self.velocidad.x = accion[0] * 4  # 4
@@ -190,9 +214,18 @@ class Entidad(Sprite):
         self.rect.x = round(self.pos.x)
 
     def saltar(self, accion):
-        if accion[1] and not self.saltando and not self.cayendo:
-            self.velocidad.y = self.VELOCIDAD_SALTO
-            self.saltando = True
+        if accion[1] and (not self.cayendo or self.saltando):
+            if not self.saltando:
+                self.velocidad.y = self.VELOCIDAD_SALTO
+                self.saltando = True
+                self.timer_salto = self.frames_salto
+            elif not self.doble_salto and not self.timer_salto:
+                self.velocidad.y = self.VELOCIDAD_DOBLE_SALTO
+                self.doble_salto = True
+
+        # if accion[1] and not self.saltando and not self.cayendo:
+        #     self.velocidad.y = self.VELOCIDAD_SALTO
+        #     self.saltando = True
 
     def aplicar_gravedad(self):
         self.velocidad.y += self.GRAVEDAD
@@ -207,7 +240,15 @@ class Entidad(Sprite):
             self.colision_nivel()
 
         self.cayendo = round(self.velocidad.y) > 0
+
+        self.actualizar_timers()
         # self.aplicar_gravedad()
+
+        # print(self.saltando, self.doble_salto, self.cayendo, self.timer_salto, self.velocidad.y)
+
+    def actualizar_timers(self):
+        if self.timer_salto > 0 and self.saltando:
+            self.timer_salto -= 1
 
     def colision_nivel(self):
         self.colision_nivel_horizontal()
@@ -223,6 +264,7 @@ class Entidad(Sprite):
                     self.pos.y = self.rect.y
                     self.velocidad.y = 0
                     self.saltando = False
+                    self.doble_salto = False
                 elif self.velocidad.y < 0:
                     self.rect.top = bloque.rect.bottom
                     self.pos.y = self.rect.y
@@ -234,14 +276,27 @@ class Entidad(Sprite):
                 if self.velocidad.x > 0:
                     self.rect.right = bloque.rect.left
                     self.pos.x = self.rect.x
+                    if self.cayendo and not self.doble_salto:
+                        # Fenómeno curioso: esto tiende una velocidad de 0,8
+                        # Llego a la conclusión de que un número n dividido entre 2 más un número m
+                        # repetidamente tiende a 2m.
+                        # n/2 + m -> 2m
+                        # Por ejemplo: n/2 + 0,4 -> 0,8
+                        self.velocidad.y /= 2
                 elif self.velocidad.x < 0:
                     self.rect.left = bloque.rect.right
                     self.pos.x = self.rect.x
+                    if self.cayendo and not self.doble_salto:
+                        self.velocidad.y /= 2
 
 
 class Jugador(Entidad):
     def __init__(self, pos: pygame.Vector2, nivel: Nivel):
-        super().__init__(pos, (32, 64), 'red', nivel)
+        super().__init__(pos, (32, 50), 'red', nivel)  # (32, 50)
+
+    def reset(self):
+        self.pos.update(64, 448)
+        self.velocidad.update(0, 0)
 
     # def update(self, accion):
     #     super().update(accion)
