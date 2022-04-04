@@ -142,6 +142,21 @@ class Nivel:
             "XX      XXXX      XX",
             "XXXXXXXXXXXX  XXXXXX"
         ]
+
+        # datos_nivel = [
+        #     "X       X              XX",
+        #     "X                       X",
+        #     "X               XXX     X",
+        #     "X           X           X",
+        #     "X   XXXXX              X",
+        #     "X                    XX",
+        #     "X                   X",
+        #     "XXXXX  XXXX    XX  X",
+        #     "XXX XX         X  XX",
+        #     "XX      XXXX      XX",
+        #     "XXXXXXXXXXXX  XXXXXX"
+        # ]
+
         tam_bloque = 64
 
         for fila_i, fila in enumerate(datos_nivel):
@@ -200,25 +215,40 @@ class Entidad(Sprite):
         self.nivel = nivel
         self.velocidad = velocidad
 
+        self.orientacion = 1
+
         self.comprobar_colision_nivel = True
         self.saltando = False
         self.doble_salto = False
         self.cayendo = False
+        self.dash_iniciado = False
+        self.dash_finalizado = False
+        self.animacion_activa = False
 
-        self.frames_salto = 20
+        self.cooldown_salto = 20
+        self.cooldown_dash = 60*2
+        self.cooldown_disparo = 20
+        self.duracion_dash = 10
+
         self.timer_salto = 0
+        self.timer_cooldown_dash = 0
+        self.timer_duracion_dash = 0
+        self.timer_disparo = 0
 
     def mover(self, accion):
-        self.velocidad.x = accion[0] * 4  # 4
-        self.pos.x += self.velocidad.x
-        self.rect.x = round(self.pos.x)
+        if not self.animacion_activa:
+            if accion:
+                self.orientacion = 1 if accion == 1 else -1
+            self.velocidad.x = accion * 4  # 4
+            self.pos.x += self.velocidad.x
+            self.rect.x = round(self.pos.x)
 
     def saltar(self, accion):
-        if accion[1] and (not self.cayendo or self.saltando):
+        if accion and (not self.cayendo or self.saltando):
             if not self.saltando:
                 self.velocidad.y = self.VELOCIDAD_SALTO
                 self.saltando = True
-                self.timer_salto = self.frames_salto
+                self.timer_salto = self.cooldown_salto
             elif not self.doble_salto and not self.timer_salto:
                 self.velocidad.y = self.VELOCIDAD_DOBLE_SALTO
                 self.doble_salto = True
@@ -227,14 +257,44 @@ class Entidad(Sprite):
         #     self.velocidad.y = self.VELOCIDAD_SALTO
         #     self.saltando = True
 
+    def dashear(self, accion):
+        if accion and not self.dash_iniciado and self.timer_cooldown_dash == 0:
+            print("Inicio dash...")
+            self.dash_iniciado = True
+            self.dash_finalizado = False
+            self.timer_duracion_dash = self.duracion_dash
+            self.animacion_activa = True
+            # self.timer_cooldown_dash = self.cooldown_dash
+
+        if self.dash_iniciado and not self.dash_finalizado:
+            print("DASH!")
+            self.velocidad.x = 15 * self.orientacion
+            self.velocidad.y = 0
+            self.pos.x += self.velocidad.x
+            self.rect.x = round(self.pos.x)
+        elif self.dash_iniciado and self.dash_finalizado:
+            print("Finalizo dash\n")
+            self.velocidad.x = 0
+            self.timer_cooldown_dash = self.cooldown_dash
+            self.dash_iniciado = False
+            self.dash_finalizado = False
+            self.animacion_activa = False
+
     def aplicar_gravedad(self):
         self.velocidad.y += self.GRAVEDAD
         self.pos.y += self.velocidad.y
         self.rect.y = round(self.pos.y)
 
+    def disparar(self, accion):
+        if accion and self.timer_disparo == 0:
+            print("PUM")
+            self.timer_disparo = self.cooldown_disparo
+
     def update(self, accion):
-        self.mover(accion)
-        self.saltar(accion)
+        self.dashear(accion[2])
+        self.mover(accion[0])
+        self.saltar(accion[1])
+        self.disparar(accion[3])
 
         if self.comprobar_colision_nivel:
             self.colision_nivel()
@@ -249,6 +309,17 @@ class Entidad(Sprite):
     def actualizar_timers(self):
         if self.timer_salto > 0 and self.saltando:
             self.timer_salto -= 1
+
+        if self.timer_cooldown_dash > 0:
+            self.timer_cooldown_dash -= 1
+
+        if self.timer_duracion_dash > 0:
+            self.timer_duracion_dash -= 1
+            if self.timer_duracion_dash == 0:
+                self.dash_finalizado = True
+
+        if self.timer_disparo > 0:
+            self.timer_disparo -= 1
 
     def colision_nivel(self):
         self.colision_nivel_horizontal()
