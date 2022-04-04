@@ -74,7 +74,8 @@ class SpatialHashSingle(pygame.sprite.GroupSingle):
 class Juego(gym.Env):
     def __init__(self):
         self.nivel = Nivel()
-        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 448), self.nivel))  # 64, 448
+        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 448), self.nivel, self))  # 64, 448
+        self.disparos_jugador = SpatialHash()
 
         self.camara = None
         self.ventana = None
@@ -83,6 +84,7 @@ class Juego(gym.Env):
     def step(self, action):
         # self.nivel.update(action)
         self.jugador.update(action)
+        self.disparos_jugador.update()
 
     def render(self, mode="human"):
         if self.flag_iniciar_render:
@@ -92,6 +94,7 @@ class Juego(gym.Env):
 
         self.camara.scroll()
 
+        self.disparos_jugador.draw(self.ventana, self.camara.offset)
         self.nivel.draw(self.ventana, self.camara.offset)
         self.jugador.draw(self.ventana, self.camara.offset)
 
@@ -102,6 +105,7 @@ class Juego(gym.Env):
 
     def reset(self):
         self.jugador.sprite.reset()
+        self.disparos_jugador.empty()
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
@@ -210,10 +214,14 @@ class Entidad(Sprite):
                  dim: tuple,
                  color,
                  nivel: Nivel,
+                 juego: Juego,
+                 velocidad_x = 4,
                  velocidad: pygame.Vector2 = pygame.Vector2()):
         super().__init__(pos, dim, color)
         self.nivel = nivel
+        self.juego = juego
         self.velocidad = velocidad
+        self.velocidad_x = velocidad_x
 
         self.orientacion = 1
 
@@ -239,7 +247,7 @@ class Entidad(Sprite):
         if not self.animacion_activa:
             if accion:
                 self.orientacion = 1 if accion == 1 else -1
-            self.velocidad.x = accion * 4  # 4
+            self.velocidad.x = accion * self.velocidad_x  # 4
             self.pos.x += self.velocidad.x
             self.rect.x = round(self.pos.x)
 
@@ -289,6 +297,7 @@ class Entidad(Sprite):
         if accion and self.timer_disparo == 0:
             print("PUM")
             self.timer_disparo = self.cooldown_disparo
+            self.juego.disparos_jugador.add(Disparo(self.pos.copy(), self.orientacion, self.nivel, self.juego))
 
     def update(self, accion):
         self.dashear(accion[2])
@@ -362,8 +371,8 @@ class Entidad(Sprite):
 
 
 class Jugador(Entidad):
-    def __init__(self, pos: pygame.Vector2, nivel: Nivel):
-        super().__init__(pos, (32, 50), 'red', nivel)  # (32, 50)
+    def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
+        super().__init__(pos, (32, 50), 'red', nivel, juego)  # (32, 50)
 
     def reset(self):
         self.pos.update(64, 448)
@@ -375,3 +384,18 @@ class Jugador(Entidad):
     #     print(self.pos, self.rect.topleft)
     #     print(f"Cayendo:  {self.cayendo}\n"
     #           f"Saltando: {self.saltando}\n")
+
+
+class Disparo(Entidad):
+    def __init__(self, pos: pygame.Vector2, orientacion, nivel: Nivel, juego: Juego):
+        super().__init__(pos, (16, 8), 'white', nivel, juego, velocidad_x=16)
+        self.orientacion = orientacion
+        self.ant_x = self.rect.x
+
+    def update(self, accion=None):
+        self.ant_x = self.rect.x
+        super().mover(self.orientacion)
+        super().colision_nivel_horizontal()
+
+        if self.ant_x == self.rect.x:
+            self.kill()
