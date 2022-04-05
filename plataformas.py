@@ -215,7 +215,7 @@ class Entidad(Sprite):
                  color,
                  nivel: Nivel,
                  juego: Juego,
-                 velocidad_x = 4,
+                 velocidad_x=4,
                  velocidad: pygame.Vector2 = pygame.Vector2()):
         super().__init__(pos, dim, color)
         self.nivel = nivel
@@ -223,18 +223,53 @@ class Entidad(Sprite):
         self.velocidad = velocidad
         self.velocidad_x = velocidad_x
 
+        # Indica la orientación horizontal, 1 si mira hacia la derecha o -1 si mira hacia la izquierda
         self.orientacion = 1
 
+        # Le afecta la gravedad, por lo que cae en función de la velocidad cada actualización (POR IMPLEMENTAR)
+        self.afectado_por_gravedad = True
+
+        # Flag que indica si hay colisión horizontal en esta actualización
+        self.flag_colision_horizontal = False
+
+        # Flag que indica si hay colisión vertical en esta actualización
+        self.flag_colision_vertical = False
+
+        # Indica si la entidad se encuentra apoyada en el suelo (POR IMPLEMENTAR)
+        self.en_suelo = False
+
+        # Indica si la entidad debería comprobar colisiones (PROBABLEMENTE OBSOLETO PRÓXIMAMENTE)
         self.comprobar_colision_nivel = True
+
+        # Indica si la entidad debería comprobar colisiones horizontales (POR IMPLEMENTAR)
+        self.comprobar_colisiones_horizontales = True
+
+        # Indica si la entidad debería comprobar colisiones verticales (POR IMPLEMENTAR)
+        self.comprobar_colisiones_verticales = True
+
+        # Indica si el sistema de detección de colisiones es discreto (True) o contínuo (False) (POR IMPLEMENTAR)
+        self.deteccion_colisiones_discreta = True
+
+        # Indica si la entidad está realizando un salto
         self.saltando = False
+
+        # Indica si la entidad está realizando un doble salto
         self.doble_salto = False
+
+        # Indica si la entidad está cayendo (preferible a consultar velocidad.y)
         self.cayendo = False
+
+        # Indica si la animación de dash se ha iniciado
         self.dash_iniciado = False
+
+        # Indica si la animación de dash ha finalizado
         self.dash_finalizado = False
+
+        # Indica si existe alguna animación activa en este instante
         self.animacion_activa = False
 
         self.cooldown_salto = 20
-        self.cooldown_dash = 60*2
+        self.cooldown_dash = 60*1
         self.cooldown_disparo = 20
         self.duracion_dash = 10
 
@@ -311,6 +346,7 @@ class Entidad(Sprite):
         self.cayendo = round(self.velocidad.y) > 0
 
         self.actualizar_timers()
+        # print(self, self.flag_colision_horizontal, self.flag_colision_vertical)
         # self.aplicar_gravedad()
 
         # print(self.saltando, self.doble_salto, self.cayendo, self.timer_salto, self.velocidad.y)
@@ -337,8 +373,10 @@ class Entidad(Sprite):
     def colision_nivel_vertical(self):
         self.aplicar_gravedad()
 
+        colisiones = 0
         for bloque in self.nivel.bloques:
             if self.rect.colliderect(bloque.rect):
+                colisiones += 1
                 if self.velocidad.y > 0:
                     self.rect.bottom = bloque.rect.top
                     self.pos.y = self.rect.y
@@ -350,9 +388,13 @@ class Entidad(Sprite):
                     self.pos.y = self.rect.y
                     self.velocidad.y = 0
 
+        self.flag_colision_vertical = colisiones > 0
+
     def colision_nivel_horizontal(self):
+        colisiones = 0
         for bloque in self.nivel.bloques:
             if self.rect.colliderect(bloque.rect):
+                colisiones += 1
                 if self.velocidad.x > 0:
                     self.rect.right = bloque.rect.left
                     self.pos.x = self.rect.x
@@ -368,6 +410,8 @@ class Entidad(Sprite):
                     self.pos.x = self.rect.x
                     if self.cayendo and not self.doble_salto:
                         self.velocidad.y /= 2
+
+            self.flag_colision_horizontal = colisiones > 0
 
 
 class Jugador(Entidad):
@@ -390,12 +434,10 @@ class Disparo(Entidad):
     def __init__(self, pos: pygame.Vector2, orientacion, nivel: Nivel, juego: Juego):
         super().__init__(pos, (16, 8), 'white', nivel, juego, velocidad_x=16)
         self.orientacion = orientacion
-        self.ant_x = self.rect.x
 
     def update(self, accion=None):
-        self.ant_x = self.rect.x
         super().mover(self.orientacion)
         super().colision_nivel_horizontal()
 
-        if self.ant_x == self.rect.x:
+        if self.flag_colision_horizontal:
             self.kill()

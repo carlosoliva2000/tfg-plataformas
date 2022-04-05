@@ -40,6 +40,9 @@ acciones = []  # [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0,
 
 flag_grabacion = len(acciones) == 0
 
+milisegundos = 0
+frames = 0
+
 while True:
     evento = manejar_eventos(pygame.event.get())
     if evento == 1:
@@ -67,6 +70,15 @@ while True:
     juego.step(accion)
     juego.render()
     clock.tick(60)
+
+    # frames += 1
+    # milisegundos += max(1, clock.tick())
+    #
+    # if milisegundos >= 1000:
+    #     print(frames)
+    #     milisegundos = 0
+    #     frames = 0
+
 
 if flag_grabacion:
     print(acciones)
