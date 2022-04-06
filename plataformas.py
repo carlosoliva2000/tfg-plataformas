@@ -74,7 +74,7 @@ class SpatialHashSingle(pygame.sprite.GroupSingle):
 class Juego(gym.Env):
     def __init__(self):
         self.nivel = Nivel()
-        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 448), self.nivel, self))  # 64, 448
+        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 398), self.nivel, self))  # 64, 448
         self.disparos_jugador = SpatialHash()
 
         self.camara = None
@@ -193,15 +193,20 @@ class Sprite(pygame.sprite.Sprite):
 
         self.image = pygame.Surface(dim)
         self.image.fill(color)
-        self.rect = self.image.get_rect(topleft=pos)  # Pendiente de cámara
+        self.rect = self.image.get_rect(topleft=pos)
 
         self.pos = pos
         self.activo = True
 
+    def reset(self):
+        pass
+
 
 class Bloque(Sprite):
+    COLOR = 'grey'
+
     def __init__(self, pos: pygame.Vector2, tam):
-        super().__init__(pos, (tam, tam), 'grey')
+        super().__init__(pos, (tam, tam), self.COLOR)
 
 
 class Entidad(Sprite):
@@ -213,20 +218,28 @@ class Entidad(Sprite):
                  pos: pygame.Vector2,
                  dim: tuple,
                  color,
+                 orientacion: int,
                  nivel: Nivel,
                  juego: Juego,
                  velocidad_x=4,
-                 velocidad: pygame.Vector2 = pygame.Vector2()):
+                 accion_por_defecto=None):
         super().__init__(pos, dim, color)
         self.nivel = nivel
         self.juego = juego
-        self.velocidad = velocidad
+        self.velocidad = pygame.Vector2()
         self.velocidad_x = velocidad_x
+        self.accion_por_defecto = accion_por_defecto
+
+        # Inputs de accciones
+        self.input_mover = 0
+        self.input_saltar = 0
+        self.input_dash = 0
+        self.input_disparar = 0
 
         # Indica la orientación horizontal, 1 si mira hacia la derecha o -1 si mira hacia la izquierda
-        self.orientacion = 1
+        self.orientacion = orientacion
 
-        # Le afecta la gravedad, por lo que cae en función de la velocidad cada actualización (POR IMPLEMENTAR)
+        # Le afecta la gravedad, por lo que cae en función de la velocidad cada actualización
         self.afectado_por_gravedad = True
 
         # Flag que indica si hay colisión horizontal en esta actualización
@@ -235,16 +248,16 @@ class Entidad(Sprite):
         # Flag que indica si hay colisión vertical en esta actualización
         self.flag_colision_vertical = False
 
-        # Indica si la entidad se encuentra apoyada en el suelo (POR IMPLEMENTAR)
+        # Indica si la entidad se encuentra apoyada en el suelo
         self.en_suelo = False
 
-        # Indica si la entidad debería comprobar colisiones (PROBABLEMENTE OBSOLETO PRÓXIMAMENTE)
-        self.comprobar_colision_nivel = True
+        # Indica si la entidad ha colisionado alguna vez con otro sprite, ayudando a la detección del flag anterior
+        self.ha_colisionado = False
 
-        # Indica si la entidad debería comprobar colisiones horizontales (POR IMPLEMENTAR)
+        # Indica si la entidad debería comprobar colisiones horizontales
         self.comprobar_colisiones_horizontales = True
 
-        # Indica si la entidad debería comprobar colisiones verticales (POR IMPLEMENTAR)
+        # Indica si la entidad debería comprobar colisiones verticales
         self.comprobar_colisiones_verticales = True
 
         # Indica si el sistema de detección de colisiones es discreto (True) o contínuo (False) (POR IMPLEMENTAR)
@@ -278,78 +291,44 @@ class Entidad(Sprite):
         self.timer_duracion_dash = 0
         self.timer_disparo = 0
 
-    def mover(self, accion):
-        if not self.animacion_activa:
-            if accion:
-                self.orientacion = 1 if accion == 1 else -1
-            self.velocidad.x = accion * self.velocidad_x  # 4
-            self.pos.x += self.velocidad.x
-            self.rect.x = round(self.pos.x)
-
-    def saltar(self, accion):
-        if accion and (not self.cayendo or self.saltando):
-            if not self.saltando:
-                self.velocidad.y = self.VELOCIDAD_SALTO
-                self.saltando = True
-                self.timer_salto = self.cooldown_salto
-            elif not self.doble_salto and not self.timer_salto:
-                self.velocidad.y = self.VELOCIDAD_DOBLE_SALTO
-                self.doble_salto = True
-
-        # if accion[1] and not self.saltando and not self.cayendo:
-        #     self.velocidad.y = self.VELOCIDAD_SALTO
-        #     self.saltando = True
-
-    def dashear(self, accion):
-        if accion and not self.dash_iniciado and self.timer_cooldown_dash == 0:
-            print("Inicio dash...")
-            self.dash_iniciado = True
-            self.dash_finalizado = False
-            self.timer_duracion_dash = self.duracion_dash
-            self.animacion_activa = True
-            # self.timer_cooldown_dash = self.cooldown_dash
-
-        if self.dash_iniciado and not self.dash_finalizado:
-            print("DASH!")
-            self.velocidad.x = 15 * self.orientacion
-            self.velocidad.y = 0
-            self.pos.x += self.velocidad.x
-            self.rect.x = round(self.pos.x)
-        elif self.dash_iniciado and self.dash_finalizado:
-            print("Finalizo dash\n")
-            self.velocidad.x = 0
-            self.timer_cooldown_dash = self.cooldown_dash
-            self.dash_iniciado = False
-            self.dash_finalizado = False
-            self.animacion_activa = False
-
-    def aplicar_gravedad(self):
-        self.velocidad.y += self.GRAVEDAD
-        self.pos.y += self.velocidad.y
-        self.rect.y = round(self.pos.y)
-
-    def disparar(self, accion):
-        if accion and self.timer_disparo == 0:
-            print("PUM")
-            self.timer_disparo = self.cooldown_disparo
-            self.juego.disparos_jugador.add(Disparo(self.pos.copy(), self.orientacion, self.nivel, self.juego))
-
     def update(self, accion):
-        self.dashear(accion[2])
-        self.mover(accion[0])
-        self.saltar(accion[1])
-        self.disparar(accion[3])
+        if self.accion_por_defecto:
+            accion = self.accion_por_defecto
 
-        if self.comprobar_colision_nivel:
-            self.colision_nivel()
-
-        self.cayendo = round(self.velocidad.y) > 0
-
+        self.manejar_input_acciones(accion)
+        self.aplicar_acciones()
+        self.actualizar_flags()
         self.actualizar_timers()
-        # print(self, self.flag_colision_horizontal, self.flag_colision_vertical)
-        # self.aplicar_gravedad()
+        self.resolver_flags_timers()
+        self.log()
 
-        # print(self.saltando, self.doble_salto, self.cayendo, self.timer_salto, self.velocidad.y)
+    def manejar_input_acciones(self, accion):
+        self.input_mover = accion[0]
+        self.input_saltar = accion[1]
+        self.input_dash = accion[2]
+        self.input_disparar = accion[3]
+
+    def aplicar_acciones(self):
+        self.aplicar_movimiento_horizontal()
+        if self.comprobar_colisiones_horizontales:
+            self.calcular_colisiones_horizontales()
+
+        self.aplicar_movimiento_vertical()
+        if self.comprobar_colisiones_verticales:
+            self.calcular_colisiones_verticales()
+
+        self.disparar()
+
+    def actualizar_flags(self):
+        self.cayendo = round(self.velocidad.y) > 0
+        self.ha_colisionado = (self.ha_colisionado or
+                               self.flag_colision_horizontal or self.flag_colision_vertical)
+
+        # Si la gravedad no afecta y se produce una colisión horizontal, producirá falsos positivos
+        if self.ha_colisionado:
+            self.en_suelo = not self.cayendo and not self.saltando
+        else:
+            self.en_suelo = False
 
     def actualizar_timers(self):
         if self.timer_salto > 0 and self.saltando:
@@ -366,13 +345,101 @@ class Entidad(Sprite):
         if self.timer_disparo > 0:
             self.timer_disparo -= 1
 
-    def colision_nivel(self):
-        self.colision_nivel_horizontal()
-        self.colision_nivel_vertical()
+    def resolver_flags_timers(self):
+        if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
+            # Fenómeno curioso: esto tiende una velocidad de 0,8
+            # Llego a la conclusión de que un número n dividido entre 2 más un número m
+            # repetidamente tiende a 2m.
+            # n/2 + m -> 2m
+            # Por ejemplo: n/2 + 0,4 -> 0,8
+            self.velocidad.y /= 2
 
-    def colision_nivel_vertical(self):
-        self.aplicar_gravedad()
+    def log(self):
+        pass
 
+    def aplicar_movimiento_horizontal(self):
+        self.mover()
+        self.dashear()
+
+        self.pos.x += self.velocidad.x
+        self.rect.x = round(self.pos.x)
+
+    def aplicar_movimiento_vertical(self):
+        self.saltar()
+        if self.afectado_por_gravedad:
+            self.aplicar_gravedad()
+
+        self.pos.y += self.velocidad.y
+        self.rect.y = round(self.pos.y)
+
+    def mover(self):
+        accion = self.input_mover
+        if not self.animacion_activa:
+            if accion:
+                self.orientacion = 1 if accion == 1 else -1
+            self.velocidad.x = accion * self.velocidad_x
+
+    def saltar(self):
+        accion = self.input_saltar
+        if accion and (not self.cayendo or self.saltando):
+            if not self.saltando:
+                self.velocidad.y = self.VELOCIDAD_SALTO
+                self.saltando = True
+                self.timer_salto = self.cooldown_salto
+            elif not self.doble_salto and not self.timer_salto:
+                self.velocidad.y = self.VELOCIDAD_DOBLE_SALTO
+                self.doble_salto = True
+
+        # if accion[1] and not self.saltando and not self.cayendo:
+        #     self.velocidad.y = self.VELOCIDAD_SALTO
+        #     self.saltando = True
+
+    def aplicar_gravedad(self):
+        self.velocidad.y += self.GRAVEDAD
+
+    def dashear(self):
+        accion = self.input_dash
+        if accion and not self.dash_iniciado and self.timer_cooldown_dash == 0:
+            # print("Inicio dash...")
+            self.dash_iniciado = True
+            self.dash_finalizado = False
+            self.timer_duracion_dash = self.duracion_dash
+            self.animacion_activa = True
+
+        if self.dash_iniciado and not self.dash_finalizado:
+            # print("DASH!")
+            self.velocidad.x = 15 * self.orientacion
+            self.velocidad.y = 0
+        elif self.dash_iniciado and self.dash_finalizado:
+            # print("Finalizo dash\n")
+            self.velocidad.x = 0
+            self.timer_cooldown_dash = self.cooldown_dash
+            self.dash_iniciado = False
+            self.dash_finalizado = False
+            self.animacion_activa = False
+
+    def disparar(self):
+        accion = self.input_disparar
+        if accion and self.timer_disparo == 0:
+            # print("PUM")
+            self.timer_disparo = self.cooldown_disparo
+            self.juego.disparos_jugador.add(Disparo(self.pos.copy(), self.orientacion, self.nivel, self.juego))
+
+    def calcular_colisiones_horizontales(self):
+        colisiones = 0
+        for bloque in self.nivel.bloques:
+            if self.rect.colliderect(bloque.rect):
+                colisiones += 1
+                if self.velocidad.x > 0:
+                    self.rect.right = bloque.rect.left
+                    self.pos.x = self.rect.x
+                elif self.velocidad.x < 0:
+                    self.rect.left = bloque.rect.right
+                    self.pos.x = self.rect.x
+
+            self.flag_colision_horizontal = colisiones > 0
+
+    def calcular_colisiones_verticales(self):
         colisiones = 0
         for bloque in self.nivel.bloques:
             if self.rect.colliderect(bloque.rect):
@@ -390,37 +457,19 @@ class Entidad(Sprite):
 
         self.flag_colision_vertical = colisiones > 0
 
-    def colision_nivel_horizontal(self):
-        colisiones = 0
-        for bloque in self.nivel.bloques:
-            if self.rect.colliderect(bloque.rect):
-                colisiones += 1
-                if self.velocidad.x > 0:
-                    self.rect.right = bloque.rect.left
-                    self.pos.x = self.rect.x
-                    if self.cayendo and not self.doble_salto:
-                        # Fenómeno curioso: esto tiende una velocidad de 0,8
-                        # Llego a la conclusión de que un número n dividido entre 2 más un número m
-                        # repetidamente tiende a 2m.
-                        # n/2 + m -> 2m
-                        # Por ejemplo: n/2 + 0,4 -> 0,8
-                        self.velocidad.y /= 2
-                elif self.velocidad.x < 0:
-                    self.rect.left = bloque.rect.right
-                    self.pos.x = self.rect.x
-                    if self.cayendo and not self.doble_salto:
-                        self.velocidad.y /= 2
-
-            self.flag_colision_horizontal = colisiones > 0
-
 
 class Jugador(Entidad):
+    DIMENSION = (32, 50)
+    COLOR = 'red'
+    ORIENTACION_INICIAL = 1
+
     def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
-        super().__init__(pos, (32, 50), 'red', nivel, juego)  # (32, 50)
+        super().__init__(pos, self.DIMENSION, self.COLOR, self.ORIENTACION_INICIAL, nivel, juego)  # (32, 50)
 
     def reset(self):
-        self.pos.update(64, 448)
+        self.pos.update(64, 398)
         self.velocidad.update(0, 0)
+        self.ha_colisionado = False
 
     # def update(self, accion):
     #     super().update(accion)
@@ -431,13 +480,23 @@ class Jugador(Entidad):
 
 
 class Disparo(Entidad):
+    DIMENSION = (16, 8)
+    COLOR = 'white'
+    VELOCIDAD_X = 16
+    ACCION_1 = [1, 0, 0, 0]
+    ACCION_2 = [-1, 0, 0, 0]
+
     def __init__(self, pos: pygame.Vector2, orientacion, nivel: Nivel, juego: Juego):
-        super().__init__(pos, (16, 8), 'white', nivel, juego, velocidad_x=16)
-        self.orientacion = orientacion
+        super().__init__(pos, self.DIMENSION, self.COLOR, orientacion, nivel, juego,
+                         self.VELOCIDAD_X, self.ACCION_1 if orientacion == 1 else self.ACCION_2)
+
+        self.comprobar_colisiones_verticales = False
+        self.afectado_por_gravedad = False
 
     def update(self, accion=None):
-        super().mover(self.orientacion)
-        super().colision_nivel_horizontal()
+        super().update(self.accion_por_defecto)
 
+    def resolver_flags_timers(self):
+        super().resolver_flags_timers()
         if self.flag_colision_horizontal:
             self.kill()
