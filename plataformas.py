@@ -318,7 +318,7 @@ class Entidad(Sprite):
         for bloque in self.nivel.bloques:
             if self.rect.colliderect(bloque.rect):
                 colisiones += 1
-                self.en_colision_horizontal(bloque)
+                self.en_colision_horizontal(bloque, self.velocidad.x)
 
             self.flag_colision_horizontal = colisiones > 0
 
@@ -327,11 +327,11 @@ class Entidad(Sprite):
         for bloque in self.nivel.bloques:
             if self.rect.colliderect(bloque.rect):
                 colisiones += 1
-                self.en_colision_vertical(bloque)
+                self.en_colision_vertical(bloque, self.velocidad.y)
 
         self.flag_colision_vertical = colisiones > 0
 
-    def en_colision_horizontal(self, bloque):
+    def en_colision_horizontal(self, bloque, vx):
         if self.velocidad.x > 0:
             self.rect.right = bloque.rect.left
         elif self.velocidad.x < 0:
@@ -339,7 +339,7 @@ class Entidad(Sprite):
 
         self.pos.x = self.rect.x
 
-    def en_colision_vertical(self, bloque):
+    def en_colision_vertical(self, bloque, vy):
         if self.velocidad.y > 0:
             self.rect.bottom = bloque.rect.top
             self.saltando = False
@@ -483,9 +483,9 @@ class Jugador(Tirador):
             self.dash_finalizado = False
             self.animacion_activa = False
 
-    def en_colision_vertical(self, bloque):
-        super().en_colision_vertical(bloque)
-        if self.velocidad.y > 0:
+    def en_colision_vertical(self, bloque, vy):
+        super().en_colision_vertical(bloque, vy)
+        if vy > 0:
             self.doble_salto = False
 
 
