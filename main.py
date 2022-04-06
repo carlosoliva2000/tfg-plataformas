@@ -14,10 +14,11 @@ def manejar_eventos(eventos):
 
 
 def manejar_entrada(teclas):
-    accion_saltar = 0
-    accion_dash = 0
-    accion_disparar = 0
     accion_mover = 0
+    accion_saltar = 0
+    accion_disparar = 0
+    accion_dash = 0
+
     if teclas[pygame.KSCAN_SPACE] or teclas[pygame.KSCAN_UP] or teclas[pygame.KSCAN_W]:
         accion_saltar = 1
     if teclas[pygame.KSCAN_B]:
@@ -28,7 +29,7 @@ def manejar_entrada(teclas):
         accion_mover += -1
     if teclas[pygame.KSCAN_RIGHT] or teclas[pygame.KSCAN_D]:
         accion_mover += 1
-    return [accion_mover, accion_saltar, accion_dash, accion_disparar]
+    return [accion_mover, accion_saltar, accion_disparar, accion_dash]
 
 
 pygame.init()
