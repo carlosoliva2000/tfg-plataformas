@@ -108,19 +108,19 @@ class Nivel:
             "XXXXXXXXXXXX. XXXXXX"
         ]
 
-        # datos_nivel = [
-        #     "X       X              XX",
-        #     "X                       X",
-        #     "X               XXX     X",
-        #     "X           X           X",
-        #     "X   XXXXX              X",
-        #     "X                    XX",
-        #     "X                   X",
-        #     "XXXXX  XXXX    XX  X",
-        #     "XXX XX         X  XX",
-        #     "XX      XXXX      XX",
-        #     "XXXXXXXXXXXX  XXXXXX"
-        # ]
+        datos_nivel = [
+            "        X    ...       XX.",
+            "             ...       .X.",
+            "X               XXX     X",
+            "X    ...    X           X",
+            " X  XXXXX              X",
+            "  X          .       XX",
+            "   X         .      X",
+            "XXXXX  XXXX  XXXXXXX",
+            "XXX.XX      X  X  XX",
+            "XX      XXXX.     XX",
+            "XXXXXXXXXXXX. XXXXXX"
+        ]
 
         tam_bloque = 64
 
@@ -569,9 +569,27 @@ class EnemigoSaltarin(Entidad):
 
     def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
         super().__init__(pos, (50, 30), self.COLOR, -1, nivel, juego, 1)
+        self.prev_x = self.pos.x
+        self.intentar_salto = False
 
     def determinar_accion(self):
-        return [self.orientacion, 1 if self.flag_colision_horizontal else 0]
+        if self.flag_colision_horizontal and self.en_suelo:
+            if not self.intentar_salto or self.prev_x != self.pos.x:
+                self.intentar_salto = True
+                self.prev_x = self.pos.x
+                return [self.orientacion, 1]
+            else:
+                # if self.prev_x == self.pos.x:
+                return [-self.orientacion, 0]
+                # else:
+                #     self.prev_x = self.pos.x
+                #     return [self.orientacion, 1]
+        else:
+            if self.intentar_salto and self.en_suelo:
+                self.intentar_salto = False
+            return [self.orientacion, 0]
+
+        # return [self.orientacion, 1 if self.flag_colision_horizontal else 0]
 
     def actualizar_animacion(self):
         self.image.fill(self.COLOR)
