@@ -236,6 +236,7 @@ class Entidad(Sprite):
         self.actualizar_flags()
         self.actualizar_timers()
         self.resolver_flags_timers()
+        self.actualizar_animacion()
         self.log()
 
     def seleccionar_accion(self, accion):
@@ -283,6 +284,9 @@ class Entidad(Sprite):
             self.timer_salto -= 1
 
     def resolver_flags_timers(self):
+        pass
+
+    def actualizar_animacion(self):
         pass
 
     def log(self):
@@ -446,6 +450,12 @@ class Jugador(Tirador):
             # n/2 + m -> 2m
             # Por ejemplo: n/2 + 0,4 -> 0,8
             self.velocidad.y /= 2
+
+    def actualizar_animacion(self):
+        self.image.fill(self.COLOR)
+        self.image.fill('DARKRED',
+                        pygame.rect.Rect(self.rect.w/2 if self.orientacion == 1 else 0,
+                                         self.rect.h/6, self.rect.w/2, self.rect.h/6))
 
     def aplicar_movimiento_horizontal(self):
         super().aplicar_movimiento_horizontal()
