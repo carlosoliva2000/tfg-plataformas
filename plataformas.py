@@ -27,6 +27,9 @@ class Juego(gym.Env):
         self.nivel = Nivel()
         self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 398), self.nivel, self))  # 64, 448
         self.disparos_jugador = SpatialHash()
+        self.enemigos = SpatialHash()
+        self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
+        self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
 
         self.camara = None
         self.ventana = None
@@ -36,6 +39,7 @@ class Juego(gym.Env):
         # self.nivel.update(action)
         self.jugador.update(action)
         self.disparos_jugador.update()
+        self.enemigos.update()
 
     def render(self, mode="human"):
         if self.flag_iniciar_render:
@@ -48,6 +52,7 @@ class Juego(gym.Env):
         self.disparos_jugador.draw(self.ventana, self.camara.offset)
         self.nivel.draw(self.ventana, self.camara.offset)
         self.jugador.draw(self.ventana, self.camara.offset)
+        self.enemigos.draw(self.ventana, self.camara.offset)
 
         # pygame.draw.line(self.ventana, 'red', (ANCHO/2, 0), (ANCHO/2, ALTO))
         # pygame.draw.line(self.ventana, 'red', (ANCHO / 3, 0), (ANCHO / 3, ALTO))
@@ -55,8 +60,12 @@ class Juego(gym.Env):
         pygame.display.update()
 
     def reset(self):
+        self.nivel.reset()
         self.jugador.sprite.reset()
         self.disparos_jugador.empty()
+        self.enemigos.empty()
+        self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
+        self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
@@ -69,6 +78,7 @@ class Juego(gym.Env):
 class Nivel:
     def __init__(self):
         self.bloques = SpatialHash()  # pygame.sprite.Group()
+        self.monedas = SpatialHash()
 
         datos_nivel = [
             "                         ",
@@ -85,17 +95,17 @@ class Nivel:
         ]
 
         datos_nivel = [
-            "        X              XX",
-            "                        X",
+            "        X    ...       XX.",
+            "             ...       .X.",
             "                XXX     X",
-            "            X           X",
+            "     ...    X           X",
             "    XXXXX              X",
-            "                     XX",
-            "                    X",
+            "             .       XX",
+            "             .      X",
             "XXXXX  XXXX    XX  X",
-            "XXX XX         X  XX",
-            "XX      XXXX      XX",
-            "XXXXXXXXXXXX  XXXXXX"
+            "XXX.XX         X  XX",
+            "XX      XXXX.     XX",
+            "XXXXXXXXXXXX. XXXXXX"
         ]
 
         # datos_nivel = [
@@ -120,9 +130,14 @@ class Nivel:
                 y = fila_i * tam_bloque
                 if celda == 'X':
                     self.bloques.add(Bloque(pygame.Vector2(x, y), tam_bloque))
+                elif celda == '.':
+                    self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
                 # elif celda == 'P':
                 #     print(x, y)
                 #     self.jugador.add(Jugador((x, y)))
+
+        self.datos_nivel = datos_nivel
+        self.tam_bloque = tam_bloque
 
         # self.bloques.add(Bloque((0, 0), tam_bloque))
         # self.bloques.add(Bloque((64, 64), tam_bloque))
@@ -131,8 +146,21 @@ class Nivel:
     def update(self, accion):
         pass
 
+    def reset(self):
+        self.monedas.empty()
+        datos_nivel = self.datos_nivel
+        tam_bloque = self.tam_bloque
+
+        for fila_i, fila in enumerate(datos_nivel):
+            for col_i, celda in enumerate(fila):
+                if celda == '.':
+                    x = col_i * tam_bloque
+                    y = fila_i * tam_bloque
+                    self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
+
     def draw(self, ventana, offset):
         self.bloques.draw(ventana, offset)
+        self.monedas.draw(ventana, offset)
 
 
 class Sprite(pygame.sprite.Sprite):
@@ -158,6 +186,15 @@ class Bloque(Sprite):
 
     def __init__(self, pos: pygame.Vector2, tam):
         super().__init__(pos, (tam, tam), self.COLOR)
+
+
+class Moneda(Sprite):
+    TAM = 16
+    DIMENSION = (TAM, TAM)
+    COLOR = 'yellow'
+
+    def __init__(self, pos: pygame.Vector2):
+        super().__init__(pos, self.DIMENSION, self.COLOR)
 
 
 class Entidad(Sprite):
@@ -425,6 +462,7 @@ class Jugador(Tirador):
 
     def reset(self):
         self.pos.update(64, 398)
+        self.orientacion = 1
         self.velocidad.update(0, 0)
         self.ha_colisionado = False
 
@@ -455,7 +493,7 @@ class Jugador(Tirador):
         self.image.fill(self.COLOR)
         self.image.fill('DARKRED',
                         pygame.rect.Rect(self.rect.w/2 if self.orientacion == 1 else 0,
-                                         self.rect.h/6, self.rect.w/2, self.rect.h/6))
+                                         self.rect.h/6, self.rect.w/2+1, self.rect.h/6))
 
     def aplicar_movimiento_horizontal(self):
         super().aplicar_movimiento_horizontal()
@@ -493,10 +531,53 @@ class Jugador(Tirador):
             self.dash_finalizado = False
             self.animacion_activa = False
 
+    def calcular_colisiones_horizontales(self):
+        super().calcular_colisiones_horizontales()
+        moneda = pygame.sprite.spritecollideany(self, self.nivel.monedas)
+        if moneda:
+            moneda.kill()
+
     def en_colision_vertical(self, bloque, vy):
         super().en_colision_vertical(bloque, vy)
         if vy > 0:
             self.doble_salto = False
+
+
+class EnemigoDeambulante(Entidad):
+    VELOCIDAD_SALTO = -9
+    COLOR = 'brown'
+
+    def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
+        super().__init__(pos, (50, 30), self.COLOR, -1, nivel, juego, 1)
+
+    def determinar_accion(self):
+        if self.flag_colision_horizontal:
+            return [-self.orientacion, 0]
+        else:
+            return [self.orientacion, 0]
+
+    def actualizar_animacion(self):
+        self.image.fill(self.COLOR)
+        self.image.fill('black',
+                        pygame.rect.Rect(self.rect.w-self.rect.w/3 if self.orientacion == 1 else 0,
+                                         self.rect.h/6, self.rect.w/3+1, self.rect.h/6))
+
+
+class EnemigoSaltarin(Entidad):
+    VELOCIDAD_SALTO = -9
+    COLOR = 'darkred'
+
+    def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
+        super().__init__(pos, (50, 30), self.COLOR, -1, nivel, juego, 1)
+
+    def determinar_accion(self):
+        return [self.orientacion, 1 if self.flag_colision_horizontal else 0]
+
+    def actualizar_animacion(self):
+        self.image.fill(self.COLOR)
+        self.image.fill('black',
+                        pygame.rect.Rect(self.rect.w-self.rect.w/3 if self.orientacion == 1 else 0,
+                                         self.rect.h/6, self.rect.w/3+1, self.rect.h/6))
 
 
 class Disparo(Entidad):
