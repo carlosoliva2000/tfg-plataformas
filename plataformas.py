@@ -30,6 +30,7 @@ class Juego(gym.Env):
         self.enemigos = SpatialHash()
         self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
         self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
+        self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
 
         self.camara = None
         self.ventana = None
@@ -67,6 +68,7 @@ class Juego(gym.Env):
         self.enemigos.empty()
         self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
         self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
+        self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
@@ -614,6 +616,62 @@ class EnemigoSaltarin(Entidad):
             return [self.orientacion, 0]
 
         # return [self.orientacion, 1 if self.flag_colision_horizontal else 0]
+
+    def actualizar_animacion(self):
+        self.image.fill(self.COLOR)
+        self.image.fill('black',
+                        pygame.rect.Rect(self.rect.w-self.rect.w/3 if self.orientacion == 1 else 0,
+                                         self.rect.h/6, self.rect.w/3+1, self.rect.h/6))
+
+
+class EnemigoTirador(Tirador):
+    COLOR = 'darkred'
+    VELOCIDAD_SALTO = -9
+
+    def __init__(self, pos: pygame.Vector2, nivel: Nivel, juego: Juego):
+        super().__init__(pos, (32, 50), self.COLOR, -1, nivel, juego, 1)
+        self.prev_x = self.pos.x
+        self.intentar_salto = False
+
+        self.disparos_efectuados = 0
+        self.rafaga = 3
+        self.cooldown_rafaga = 60 * 5
+        self.cooldown_disparo = self.cooldown_disparo * 1.2
+        self.timer_rafaga = 0
+
+    def actualizar_timers(self):
+        super().actualizar_timers()
+        if self.timer_rafaga > 0:
+            self.timer_rafaga -= 1
+
+    def determinar_accion(self):
+        if self.flag_colision_horizontal and self.en_suelo:
+            if not self.intentar_salto or self.prev_x != self.pos.x:
+                self.intentar_salto = True
+                self.prev_x = self.pos.x
+                # self.velocidad_x = 4  # Ajusta velocidad para saltar
+                accion = [self.orientacion, 1, 0]
+            else:
+                # if self.prev_x == self.pos.x:
+                accion = [-self.orientacion, 0, 0]
+                # else:
+                #     self.prev_x = self.pos.x
+                #     return [self.orientacion, 1]
+        else:
+            if self.intentar_salto and self.en_suelo:
+                self.intentar_salto = False
+                # self.velocidad_x = 1  # Ajusta velocidad tras saltar
+            accion = [self.orientacion, 0, 0]
+
+        if self.disparos_efectuados < self.rafaga:
+            if self.timer_rafaga == 0 and self.timer_disparo == 0:
+                accion[2] = 1
+                self.disparos_efectuados += 1
+        else:
+            self.timer_rafaga = self.cooldown_rafaga
+            self.disparos_efectuados = 0
+
+        return accion
 
     def actualizar_animacion(self):
         self.image.fill(self.COLOR)
