@@ -51,7 +51,8 @@ class Juego(gym.Env):
 
         self.disparos_jugador.draw(self.ventana, self.camara.offset)
         self.nivel.draw(self.ventana, self.camara.offset)
-        self.jugador.draw(self.ventana, self.camara.offset)
+        if self.jugador.sprite.activo:
+            self.jugador.draw(self.ventana, self.camara.offset)
         self.enemigos.draw(self.ventana, self.camara.offset)
 
         # pygame.draw.line(self.ventana, 'red', (ANCHO/2, 0), (ANCHO/2, ALTO))
@@ -177,8 +178,12 @@ class Sprite(pygame.sprite.Sprite):
         self.pos = pos
         self.activo = True
 
+    def kill(self) -> None:
+        super().kill()
+        self.activo = False
+
     def reset(self):
-        pass
+        self.activo = True
 
 
 class Bloque(Sprite):
@@ -265,16 +270,17 @@ class Entidad(Sprite):
         self.timer_salto = 0
 
     def update(self, accion=None):
-        self.seleccionar_accion(accion)
-        accion = self.accion
+        if self.activo:
+            self.seleccionar_accion(accion)
+            accion = self.accion
 
-        self.manejar_input_acciones(accion)
-        self.aplicar_acciones()
-        self.actualizar_flags()
-        self.actualizar_timers()
-        self.resolver_flags_timers()
-        self.actualizar_animacion()
-        self.log()
+            self.manejar_input_acciones(accion)
+            self.aplicar_acciones()
+            self.actualizar_flags()
+            self.actualizar_timers()
+            self.resolver_flags_y_timers()
+            self.actualizar_animacion()
+            self.log()
 
     def seleccionar_accion(self, accion):
         if accion:
@@ -320,7 +326,7 @@ class Entidad(Sprite):
         if self.timer_salto > 0 and self.saltando:
             self.timer_salto -= 1
 
-    def resolver_flags_timers(self):
+    def resolver_flags_y_timers(self):
         pass
 
     def actualizar_animacion(self):
@@ -372,20 +378,20 @@ class Entidad(Sprite):
 
         self.flag_colision_vertical = colisiones > 0
 
-    def en_colision_horizontal(self, bloque, vx):
+    def en_colision_horizontal(self, obj, vx):
         if self.velocidad.x > 0:
-            self.rect.right = bloque.rect.left
+            self.rect.right = obj.rect.left
         elif self.velocidad.x < 0:
-            self.rect.left = bloque.rect.right
+            self.rect.left = obj.rect.right
 
         self.pos.x = self.rect.x
 
-    def en_colision_vertical(self, bloque, vy):
+    def en_colision_vertical(self, obj, vy):
         if self.velocidad.y > 0:
-            self.rect.bottom = bloque.rect.top
+            self.rect.bottom = obj.rect.top
             self.saltando = False
         elif self.velocidad.y < 0:
-            self.rect.top = bloque.rect.bottom
+            self.rect.top = obj.rect.bottom
 
         self.pos.y = self.rect.y
         self.velocidad.y = 0
@@ -428,7 +434,8 @@ class Tirador(Entidad):
         if accion and self.timer_disparo == 0:
             # print("PUM")
             self.timer_disparo = self.cooldown_disparo
-            self.juego.disparos_jugador.add(Disparo(self.pos.copy(), self.orientacion, self.nivel, self.juego))
+            self.juego.disparos_jugador.add(Disparo(self.pos.copy(), self.orientacion, self.groups()[0],
+                                                    self.nivel, self.juego))
 
 
 class Jugador(Tirador):
@@ -455,16 +462,24 @@ class Jugador(Tirador):
         self.dash_finalizado = False
 
         self.cooldown_dash = 60*1
-        self.duracion_dash = 10
+        # TODO: ajustar duración y velocidad de dash. Es muy corto y mantiene demasiada inercia
+        self.duracion_dash = 10  # 10
 
         self.timer_cooldown_dash = 0
         self.timer_duracion_dash = 0
 
+    def kill(self) -> None:
+        self.activo = False
+
     def reset(self):
+        super().reset()
         self.pos.update(64, 398)
         self.orientacion = 1
         self.velocidad.update(0, 0)
         self.ha_colisionado = False
+        self.dash_iniciado = False
+        self.dash_finalizado = False
+        self.animacion_activa = False
 
     def manejar_input_acciones(self, accion):
         super().manejar_input_acciones(accion)
@@ -480,7 +495,7 @@ class Jugador(Tirador):
             if self.timer_duracion_dash == 0:
                 self.dash_finalizado = True
 
-    def resolver_flags_timers(self):
+    def resolver_flags_y_timers(self):
         if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
             # Fenómeno curioso: esto tiende una velocidad de 0,8
             # Llego a la conclusión de que un número n dividido entre 2 más un número m
@@ -490,7 +505,7 @@ class Jugador(Tirador):
             self.velocidad.y /= 2
 
     def actualizar_animacion(self):
-        self.image.fill(self.COLOR)
+        self.image.fill(self.COLOR if not self.dash_iniciado else 'white')
         self.image.fill('DARKRED',
                         pygame.rect.Rect(self.rect.w/2 if self.orientacion == 1 else 0,
                                          self.rect.h/6, self.rect.w/2+1, self.rect.h/6))
@@ -521,7 +536,7 @@ class Jugador(Tirador):
 
         if self.dash_iniciado and not self.dash_finalizado:
             # print("DASH!")
-            self.velocidad.x = 15 * self.orientacion
+            self.velocidad.x = 15 * self.orientacion  # 15
             self.velocidad.y = 0
         elif self.dash_iniciado and self.dash_finalizado:
             # print("Finalizo dash\n")
@@ -537,8 +552,15 @@ class Jugador(Tirador):
         if moneda:
             moneda.kill()
 
-    def en_colision_vertical(self, bloque, vy):
-        super().en_colision_vertical(bloque, vy)
+        enemigo = pygame.sprite.spritecollideany(self, self.juego.enemigos)
+        if enemigo:
+            if self.dash_iniciado:
+                enemigo.kill()
+            else:
+                self.kill()
+
+    def en_colision_vertical(self, obj, vy):
+        super().en_colision_vertical(obj, vy)
         if vy > 0:
             self.doble_salto = False
 
@@ -577,6 +599,7 @@ class EnemigoSaltarin(Entidad):
             if not self.intentar_salto or self.prev_x != self.pos.x:
                 self.intentar_salto = True
                 self.prev_x = self.pos.x
+                # self.velocidad_x = 4  # Ajusta velocidad para saltar
                 return [self.orientacion, 1]
             else:
                 # if self.prev_x == self.pos.x:
@@ -587,6 +610,7 @@ class EnemigoSaltarin(Entidad):
         else:
             if self.intentar_salto and self.en_suelo:
                 self.intentar_salto = False
+                # self.velocidad_x = 1  # Ajusta velocidad tras saltar
             return [self.orientacion, 0]
 
         # return [self.orientacion, 1 if self.flag_colision_horizontal else 0]
@@ -605,15 +629,30 @@ class Disparo(Entidad):
     ACCION_1 = [1, 0, 0, 0]
     ACCION_2 = [-1, 0, 0, 0]
 
-    def __init__(self, pos: pygame.Vector2, orientacion, nivel: Nivel, juego: Juego):
+    def __init__(self, pos: pygame.Vector2, orientacion, grupo: pygame.sprite.AbstractGroup, nivel: Nivel, juego: Juego):
         super().__init__(pos, self.DIMENSION, self.COLOR, orientacion, nivel, juego,
                          self.VELOCIDAD_X, self.ACCION_1 if orientacion == 1 else self.ACCION_2)
 
         self.comprobar_colisiones_verticales = False
         self.afectado_por_gravedad = False
+        self.grupo = grupo
 
-    def resolver_flags_timers(self):
-        super().resolver_flags_timers()
+    def calcular_colisiones_horizontales(self):
+        super().calcular_colisiones_horizontales()
+        if self.grupo != self.juego.jugador and (jugador := pygame.sprite.spritecollideany(self, self.juego.jugador)):
+            self.flag_colision_horizontal = True
+            self.en_colision_horizontal(jugador, self.velocidad.x)
+        elif self.grupo != self.juego.enemigos and (enemigo := pygame.sprite.spritecollideany(self, self.juego.enemigos)):
+            self.flag_colision_horizontal = True
+            self.en_colision_horizontal(enemigo, self.velocidad.x)
+
+    def en_colision_horizontal(self, obj, vx):
+        super().en_colision_horizontal(obj, vx)
+        if isinstance(obj, Entidad):
+            obj.kill()
+
+    def resolver_flags_y_timers(self):
+        super().resolver_flags_y_timers()
         if self.flag_colision_horizontal:
             self.kill()
 
