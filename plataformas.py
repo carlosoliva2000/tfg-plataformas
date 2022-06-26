@@ -1,5 +1,5 @@
 import gym
-# import numpy as np
+import numpy as np
 import pygame
 
 
@@ -42,6 +42,9 @@ class Juego(gym.Env):
         self.disparos_jugador.update()
         self.enemigos.update()
 
+        if not self.jugador.sprite.activo:
+            self.reset()
+
     def render(self, mode="human"):
         if self.flag_iniciar_render:
             self.iniciar_render()
@@ -54,6 +57,8 @@ class Juego(gym.Env):
         self.nivel.draw(self.ventana, self.camara.offset)
         if self.jugador.sprite.activo:
             self.jugador.draw(self.ventana, self.camara.offset)
+            for r in self.jugador.sprite.rayos:
+                r.render(self.ventana, self.camara.offset)
         self.enemigos.draw(self.ventana, self.camara.offset)
 
         # pygame.draw.line(self.ventana, 'red', (ANCHO/2, 0), (ANCHO/2, ALTO))
@@ -132,7 +137,7 @@ class Nivel:
                 x = col_i * tam_bloque
                 y = fila_i * tam_bloque
                 if celda == 'X':
-                    self.bloques.add(Bloque(pygame.Vector2(x, y), tam_bloque))
+                    self.bloques.add(Bloque(pygame.Vector2(x, y), tam_bloque+1))  # tam+1 para evitar huecos de 1 px
                 elif celda == '.':
                     self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
                 # elif celda == 'P':
@@ -470,6 +475,11 @@ class Jugador(Tirador):
         self.timer_cooldown_dash = 0
         self.timer_duracion_dash = 0
 
+        self.rayos = [Rayo(self, ang) for ang in np.linspace(0, 2*np.pi, 17)]
+        # self.rayos.extend([Rayo(self, ang) for ang in np.linspace(-np.pi/2, np.pi/2, 19)])
+        # self.rayos.extend([Rayo(self, ang) for ang in np.linspace(3*np.pi/2, np.pi/2, 19)])
+        # self.rayos = [Rayo(self, ang) for ang in np.linspace(-np.pi/2, np.pi/2, 9)]
+
     def kill(self) -> None:
         self.activo = False
 
@@ -482,6 +492,13 @@ class Jugador(Tirador):
         self.dash_iniciado = False
         self.dash_finalizado = False
         self.animacion_activa = False
+
+    def update(self, accion=None):
+        super().update(accion)
+        if self.pos.y > 1000:
+            self.kill()
+        for r in self.rayos:
+            r.actualizar()
 
     def manejar_input_acciones(self, accion):
         super().manejar_input_acciones(accion)
@@ -713,6 +730,99 @@ class Disparo(Entidad):
         super().resolver_flags_y_timers()
         if self.flag_colision_horizontal:
             self.kill()
+
+
+class Rayo:
+    COLOR = {
+        0: (255, 255, 255),
+        1: 'darkgreen',
+        2: (255, 0, 0),
+        3: 'yellow',
+        4: 'blue'
+    }
+
+    def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*12):
+        self.entidad = entidad
+        self.x1 = entidad.pos.x
+        self.y1 = entidad.pos.y
+        self.ang = ang
+        self.x2 = entidad.pos.x
+        self.y2 = entidad.pos.y
+        self.longitud_maxima = longitud_maxima
+        self.longitud = longitud_maxima
+        self.longitud_interp = 1
+        self.flag_interseccion = False
+        self.objeto_impactado = 0
+
+    def actualizar(self):
+        def interseccion(x1, y1, x2, y2, x3, y3, x4, y4):
+            denominador = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4)
+            if denominador:
+                t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denominador
+                u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denominador
+                if 0 < t < 1 and 0 < u < 1:  # u>0 o 0 < u < 1
+                    return (x1 + t * (x2 - x1), y1 + t * (y2 - y1)), t
+            return None
+
+        # Actualizamos poisición en función de la del entidad
+        self.x1 = self.entidad.rect.centerx
+        self.y1 = self.entidad.rect.centery
+
+        # Actualizamos ángulo en función del ángulo del entidad
+        # self.ang = self.ang_offset + self.entidad.ang
+
+        # Actualizamos puntos de destino
+        self.x2 = self.x1 + np.cos(self.ang) * self.longitud_maxima
+        self.y2 = self.y1 + np.sin(self.ang) * self.longitud_maxima
+
+        # Comprobamos colisiones con entorno para ajustar el rayo
+        pts_corte = None
+        dist_min = 1
+        objeto = None
+        for bloque in (*self.entidad.nivel.bloques, *self.entidad.juego.enemigos,
+                       *self.entidad.nivel.monedas, *self.entidad.juego.disparos_jugador):
+            b = bloque.rect
+            dist_min_borde = 1
+            res_bloque = None
+            for borde in ((b.left, b.top, b.right, b.top), (b.right, b.top, b.right, b.bottom),
+                          (b.left, b.bottom, b.right, b.bottom), (b.left, b.top, b.left, b.bottom)):
+                res_borde = interseccion(self.x1, self.y1, self.x2, self.y2, *borde)
+                if res_borde:
+                    _, dist_borde = res_borde
+                    if dist_borde < dist_min_borde:
+                        res_bloque = res_borde
+                        dist_min_borde = dist_borde
+
+            # Si se devuelve una intersección con algún borde, entonces comprobamos si es mínimo
+            if res_bloque:
+                pts_borde, dist_borde = res_bloque
+                if dist_borde < dist_min:
+                    dist_min = dist_borde
+                    pts_corte = pts_borde
+                    objeto = bloque
+
+        # Si existe un punto de corte (ya calculado como el mínimo), entonces lo establecemos como (x2, y2)
+        if pts_corte:
+            self.x2, self.y2 = pts_corte
+            self.longitud = dist_min * self.longitud_maxima
+            self.longitud_interp = np.interp(self.longitud, [0, self.longitud_maxima], [-1, 1])
+            self.flag_interseccion = True
+            self.objeto_impactado = 1 if isinstance(objeto, Bloque) else 3 if isinstance(objeto, Moneda) else \
+                4 if isinstance(objeto, Disparo) else 2
+        else:
+            self.longitud = self.longitud_maxima
+            self.longitud_interp = 1
+            self.flag_interseccion = False
+            self.objeto_impactado = 0
+
+    def render(self, ventana, offset):
+        """
+        Renderiza el rayo.
+        :param ventana: display o ventana donde se mostrará el rayo
+        """
+        pygame.draw.aaline(ventana, self.COLOR[self.objeto_impactado],
+                           (self.x1-offset.x, self.y1-offset.y),
+                           (self.x2-offset.x, self.y2-offset.y))
 
 
 class SpatialHash(pygame.sprite.AbstractGroup):
