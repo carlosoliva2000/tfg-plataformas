@@ -71,15 +71,15 @@ def main():
 
         juego.step(accion)
         juego.render()
-        clock.tick(60)
+        # clock.tick(60)
 
-        # frames += 1
-        # milisegundos += max(1, clock.tick())
-        #
-        # if milisegundos >= 1000:
-        #     print(frames)
-        #     milisegundos = 0
-        #     frames = 0
+        frames += 1
+        milisegundos += max(1, clock.tick(60))
+
+        if milisegundos >= 1000:
+            print(frames)
+            milisegundos = 0
+            frames = 0
 
     if flag_grabacion:
         print(acciones)

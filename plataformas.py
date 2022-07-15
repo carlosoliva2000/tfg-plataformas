@@ -37,7 +37,7 @@ class Juego(gym.Env):
         self.flag_iniciar_render = True
 
     def step(self, action):
-        # self.nivel.update(action)
+        self.nivel.update(self.jugador.sprite.pos.x)
         self.jugador.update(action)
         self.disparos_jugador.update()
         self.enemigos.update()
@@ -132,17 +132,22 @@ class Nivel:
 
         tam_bloque = 64
 
-        for fila_i, fila in enumerate(datos_nivel):
-            for col_i, celda in enumerate(fila):
-                x = col_i * tam_bloque
-                y = fila_i * tam_bloque
-                if celda == 'X':
-                    self.bloques.add(Bloque(pygame.Vector2(x, y), tam_bloque+1))  # tam+1 para evitar huecos de 1 px
-                elif celda == '.':
-                    self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
-                # elif celda == 'P':
-                #     print(x, y)
-                #     self.jugador.add(Jugador((x, y)))
+        # for fila_i, fila in enumerate(datos_nivel):
+        #     for col_i, celda in enumerate(fila):
+        #         x = col_i * tam_bloque
+        #         y = fila_i * tam_bloque
+        #         if celda == 'X':
+        #             self.bloques.add(Bloque(pygame.Vector2(x, y), tam_bloque+1))  # tam+1 para evitar huecos de 1 px
+        #         elif celda == '.':
+        #             self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
+        #         # elif celda == 'P':
+        #         #     print(x, y)
+        #         #     self.jugador.add(Jugador((x, y)))
+
+        self.ultima_x = 0
+        self.step_generacion = 10 * tam_bloque
+
+        self.generar_nivel()
 
         self.datos_nivel = datos_nivel
         self.tam_bloque = tam_bloque
@@ -151,8 +156,27 @@ class Nivel:
         # self.bloques.add(Bloque((64, 64), tam_bloque))
         # self.bloques.add(Bloque((0, 64), tam_bloque))
 
-    def update(self, accion):
-        pass
+    def generar_nivel(self):
+        tam_bloque = 64
+        y_min, y_max = 0, 10
+        y_actual = 8
+        for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
+            # x = x * tam_bloque
+            y_actual = np.clip(np.random.randint(y_actual-1, y_actual+2), y_min, y_max)  # 8 * tam_bloque
+            self.bloques.add(Bloque(pygame.Vector2(x, y_actual*tam_bloque), tam_bloque+1))
+        self.ultima_x += self.step_generacion
+
+    def update(self, x_jugador):
+        # print(self.ultima_x)
+        # pass
+        if self.ultima_x - x_jugador < 64 * 14:
+            self.generar_nivel()
+            if len(self.bloques) > 60:
+                for i, b in enumerate(self.bloques):
+                    if i < 20:
+                        self.bloques.remove(b)
+                    else:
+                        break
 
     def reset(self):
         self.monedas.empty()
@@ -741,7 +765,7 @@ class Rayo:
         4: 'blue'
     }
 
-    def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*12):
+    def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*14):
         self.entidad = entidad
         self.x1 = entidad.pos.x
         self.y1 = entidad.pos.y
