@@ -28,9 +28,9 @@ class Juego(gym.Env):
         self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 398), self.nivel, self))  # 64, 448
         self.disparos_jugador = SpatialHash()
         self.enemigos = SpatialHash()
-        self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
-        self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
-        self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
+        # self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
+        # self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
+        # self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
 
         self.camara = None
         self.ventana = None
@@ -71,9 +71,9 @@ class Juego(gym.Env):
         self.jugador.sprite.reset()
         self.disparos_jugador.empty()
         self.enemigos.empty()
-        self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
-        self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
-        self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
+        # self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
+        # self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
+        # self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
@@ -87,6 +87,71 @@ class Nivel:
     def __init__(self):
         self.bloques = SpatialHash()  # pygame.sprite.Group()
         self.monedas = SpatialHash()
+
+        self.ultima_x = 0
+        self.ultima_y = 8
+        self.step_generacion = 0  # 10 * tam_bloque
+
+        self.datos_nivel = []
+        self.tam_bloque = 64
+
+        self.semilla = 0
+
+        self.repeticiones_en_y = 0
+
+        self.reset()
+
+    def generar_nivel(self):
+        tam_bloque = 64
+        y_min, y_max = 0, 10
+        y_actual = self.ultima_y
+
+        max_ancho_plat = 5
+        ancho_plataforma = np.random.randint(1, max_ancho_plat)
+        dif_altura = 2
+
+
+        for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
+            # x = x * tam_bloque
+            if ancho_plataforma <= 0:
+                y_actual = np.clip(np.random.randint(y_actual-dif_altura, y_actual+dif_altura+1), y_min, y_max)  # 8 * tam_bloque
+                if y_actual == self.ultima_y:
+                    self.repeticiones_en_y += 1
+                else:
+                    self.repeticiones_en_y = 0
+
+                if self.repeticiones_en_y == 1:
+                    y_actual = np.clip(y_actual + np.random.randint(1, dif_altura+1) * np.random.choice([-1, 1]), y_min, y_max)
+                    self.repeticiones_en_y = 0
+
+                ancho_plataforma = np.random.randint(1, max_ancho_plat)
+
+            ancho_plataforma -= 1
+            self.bloques.add(Bloque(pygame.Vector2(x, y_actual*tam_bloque), tam_bloque+1))
+            self.ultima_y = y_actual
+        self.ultima_x += self.step_generacion
+
+    def update(self, x_jugador):
+        # print(self.ultima_x)
+        # pass
+        if self.ultima_x - x_jugador < 64 * 14:
+            self.generar_nivel()
+            if len(self.bloques) > 60:
+                for i, b in enumerate(self.bloques):
+                    if i < 20:
+                        self.bloques.remove(b)
+                    else:
+                        break
+
+    def reset(self):
+        self.bloques = SpatialHash()  # pygame.sprite.Group()
+        self.monedas = SpatialHash()
+
+        semilla = np.random.randint(0, np.iinfo(np.int32).max)
+        # semilla = 664581131
+        print(f"Semilla: {semilla}")
+        np.random.seed(semilla)
+        self.semilla = semilla
 
         datos_nivel = [
             "                         ",
@@ -145,6 +210,7 @@ class Nivel:
         #         #     self.jugador.add(Jugador((x, y)))
 
         self.ultima_x = 0
+        self.ultima_y = 8
         self.step_generacion = 10 * tam_bloque
 
         self.generar_nivel()
@@ -152,43 +218,13 @@ class Nivel:
         self.datos_nivel = datos_nivel
         self.tam_bloque = tam_bloque
 
-        # self.bloques.add(Bloque((0, 0), tam_bloque))
-        # self.bloques.add(Bloque((64, 64), tam_bloque))
-        # self.bloques.add(Bloque((0, 64), tam_bloque))
-
-    def generar_nivel(self):
-        tam_bloque = 64
-        y_min, y_max = 0, 10
-        y_actual = 8
-        for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
-            # x = x * tam_bloque
-            y_actual = np.clip(np.random.randint(y_actual-1, y_actual+2), y_min, y_max)  # 8 * tam_bloque
-            self.bloques.add(Bloque(pygame.Vector2(x, y_actual*tam_bloque), tam_bloque+1))
-        self.ultima_x += self.step_generacion
-
-    def update(self, x_jugador):
-        # print(self.ultima_x)
-        # pass
-        if self.ultima_x - x_jugador < 64 * 14:
-            self.generar_nivel()
-            if len(self.bloques) > 60:
-                for i, b in enumerate(self.bloques):
-                    if i < 20:
-                        self.bloques.remove(b)
-                    else:
-                        break
-
-    def reset(self):
-        self.monedas.empty()
-        datos_nivel = self.datos_nivel
-        tam_bloque = self.tam_bloque
-
-        for fila_i, fila in enumerate(datos_nivel):
-            for col_i, celda in enumerate(fila):
-                if celda == '.':
-                    x = col_i * tam_bloque
-                    y = fila_i * tam_bloque
-                    self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
+        # self.monedas.empty()
+        # for fila_i, fila in enumerate(datos_nivel):
+        #     for col_i, celda in enumerate(fila):
+        #         if celda == '.':
+        #             x = col_i * tam_bloque
+        #             y = fila_i * tam_bloque
+        #             self.monedas.add(Moneda(pygame.Vector2(x+tam_bloque/2-Moneda.TAM/2, y+tam_bloque/2-Moneda.TAM/2)))
 
     def draw(self, ventana, offset):
         self.bloques.draw(ventana, offset)
