@@ -12,20 +12,20 @@ class Camara:
         self.entidad = entidad
         self.offset = pygame.Vector2()
         self.offset_float = pygame.Vector2()
-        self.limites = pygame.Vector2(-ANCHO/3, -(7*64 - (704-ALTO)))  # 444  # - 700/1.57
+        self.limites = pygame.Vector2(-ANCHO/3, -(6*64 - (704-ALTO)))  # 444  # - 700/1.57
 
     def scroll(self):
         self.offset_float += ((self.entidad.rect.x - self.offset_float.x + self.limites.x) / 16,
                               (self.entidad.rect.y - self.offset_float.y + self.limites.y) / 8)
         self.offset.x = max(0, round(self.offset_float.x))  # Borde izquierdo
         self.offset.y = max(-64, round(self.offset_float.y))  # Borde superior
-        self.offset.y = min(0, self.offset.y)  # Borde inferior
+        self.offset.y = min(1964, self.offset.y)  # Borde inferior
 
 
 class Juego(gym.Env):
     def __init__(self):
         self.nivel = Nivel()
-        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 398), self.nivel, self))  # 64, 448
+        self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, -128), self.nivel, self))  # 64, 398
         self.disparos_jugador = SpatialHash()
         self.enemigos = SpatialHash()
         # self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
@@ -88,6 +88,9 @@ class Nivel:
         self.bloques = SpatialHash()  # pygame.sprite.Group()
         self.monedas = SpatialHash()
 
+        self.max_y = 40
+        self.min_y = 3
+
         self.ultima_x = 0
         self.ultima_y = 8
         self.step_generacion = 0  # 10 * tam_bloque
@@ -103,32 +106,43 @@ class Nivel:
 
     def generar_nivel(self):
         tam_bloque = 64
-        y_min, y_max = 0, 10
+        y_min, y_max = self.min_y, self.max_y
         y_actual = self.ultima_y
 
-        max_ancho_plat = 5
-        ancho_plataforma = np.random.randint(1, max_ancho_plat)
-        dif_altura = 2
-
+        max_ancho_plat = 10
+        min_ancho_plat = 2
+        ancho_plataforma = np.random.randint(min_ancho_plat, max_ancho_plat)
+        inc_altura = 4
+        dec_altura = 4
 
         for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
             # x = x * tam_bloque
-            if ancho_plataforma <= 0:
-                y_actual = np.clip(np.random.randint(y_actual-dif_altura, y_actual+dif_altura+1), y_min, y_max)  # 8 * tam_bloque
-                if y_actual == self.ultima_y:
-                    self.repeticiones_en_y += 1
-                else:
-                    self.repeticiones_en_y = 0
+            if np.random.random() < 0.9:  # 80% de suelo, 20% de vacío
+                if ancho_plataforma <= 0:
+                    y_actual = np.clip(np.random.randint(y_actual - inc_altura, y_actual + dec_altura + 1), y_min, y_max)  # 8 * tam_bloque
+                    if y_actual == self.ultima_y:
+                        self.repeticiones_en_y += 1
+                    else:
+                        self.repeticiones_en_y = 0
 
-                if self.repeticiones_en_y == 1:
-                    y_actual = np.clip(y_actual + np.random.randint(1, dif_altura+1) * np.random.choice([-1, 1]), y_min, y_max)
-                    self.repeticiones_en_y = 0
+                    if self.repeticiones_en_y == 1:  # return 1 if random.random() < 0.5 else -1
+                        if np.random.random() < 0.5:  # Bajada
+                            y_actual = np.clip(y_actual - np.random.randint(1, inc_altura + 1), y_min, y_max)
+                        else:  # Subida
+                            y_actual = np.clip(y_actual + np.random.randint(1, dec_altura + 1), y_min, y_max)
+                        self.repeticiones_en_y = 0
 
-                ancho_plataforma = np.random.randint(1, max_ancho_plat)
+                    ancho_plataforma = np.random.randint(min_ancho_plat, max_ancho_plat)
 
-            ancho_plataforma -= 1
-            self.bloques.add(Bloque(pygame.Vector2(x, y_actual*tam_bloque), tam_bloque+1))
+                self.bloques.add(Bloque(pygame.Vector2(x, y_actual*tam_bloque), tam_bloque+1))
+
+            if np.random.random() < 0.05:
+                y_plat = np.clip(np.random.randint(y_actual - dec_altura, y_actual-3+1), y_min, y_max)
+                for i in range(1, np.random.randint(3, 6)):
+                    self.bloques.add(Bloque(pygame.Vector2(x+i*tam_bloque, y_plat * tam_bloque), tam_bloque + 1, 'yellow'))
+
             self.ultima_y = y_actual
+            ancho_plataforma -= 1
         self.ultima_x += self.step_generacion
 
     def update(self, x_jugador):
@@ -136,9 +150,9 @@ class Nivel:
         # pass
         if self.ultima_x - x_jugador < 64 * 14:
             self.generar_nivel()
-            if len(self.bloques) > 60:
+            if len(self.bloques) > 90:
                 for i, b in enumerate(self.bloques):
-                    if i < 20:
+                    if i < 30:
                         self.bloques.remove(b)
                     else:
                         break
@@ -147,8 +161,8 @@ class Nivel:
         self.bloques = SpatialHash()  # pygame.sprite.Group()
         self.monedas = SpatialHash()
 
-        semilla = np.random.randint(0, np.iinfo(np.int32).max)
-        # semilla = 664581131
+        semilla = np.random.randint(0, np.iinfo(np.int32).max)  # 2010757495
+        # semilla = 664581131   514453980  2013199340
         print(f"Semilla: {semilla}")
         np.random.seed(semilla)
         self.semilla = semilla
@@ -210,7 +224,9 @@ class Nivel:
         #         #     self.jugador.add(Jugador((x, y)))
 
         self.ultima_x = 0
-        self.ultima_y = 8
+        self.ultima_y = np.random.randint(self.min_y, self.max_y)
+        print(f"y inicial: {self.ultima_y}")
+        print()
         self.step_generacion = 10 * tam_bloque
 
         self.generar_nivel()
@@ -256,8 +272,8 @@ class Sprite(pygame.sprite.Sprite):
 class Bloque(Sprite):
     COLOR = 'grey'
 
-    def __init__(self, pos: pygame.Vector2, tam):
-        super().__init__(pos, (tam, tam), self.COLOR)
+    def __init__(self, pos: pygame.Vector2, tam, color=COLOR):
+        super().__init__(pos, (tam, tam), color)
 
 
 class Moneda(Sprite):
@@ -555,7 +571,7 @@ class Jugador(Tirador):
 
     def update(self, accion=None):
         super().update(accion)
-        if self.pos.y > 1000:
+        if self.pos.y > 2560:  # 1000
             self.kill()
         for r in self.rayos:
             r.actualizar()
