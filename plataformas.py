@@ -40,16 +40,30 @@ class Juego(gym.Env):
                                            shape=(4,), dtype=int)
         self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.nivel.jugador.sprite.rayos)*2+2,))
 
-        print(self.action_space.sample())
-        print(self.observation_space.sample())
+        self.observaciones = []
+        self.recompensa_total = 0.0
+        self.recompensa_step = 0.0
+
+        self.x_checkpoint = self.nivel.jugador.sprite.pos.x + self.nivel.tam_bloque * 6
+
+    @property
+    def jugador(self):
+        return self.nivel.jugador.sprite
 
     def step(self, action):
         self.nivel.update()
         self.nivel.jugador.update(action)
 
+        self.actualizar_observaciones()
+        self.actualizar_recompensas()
+
         if not self.nivel.jugador.sprite.activo:
             print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
+            info_step = self.observaciones, self.recompensa_step, True, {}
             self.reset()
+            return info_step
+
+        return self.observaciones, self.recompensa_step, False, {}
 
     def render(self, mode="human"):
         if self.flag_iniciar_render:
@@ -78,12 +92,58 @@ class Juego(gym.Env):
         # self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
         # self.enemigos.add(EnemigoTirador(pygame.Vector2(64 * 24 + 32, -64 * 40), self.nivel, self))
 
+        self.actualizar_observaciones()
+
+        self.x_checkpoint = self.nivel.jugador.sprite.pos.x + self.nivel.tam_bloque * 6
+
+        return self.observaciones
+
     def iniciar_render(self):
         self.flag_iniciar_render = False
 
         pygame.init()
         self.ventana = pygame.display.set_mode((1280, 700))
         self.camara = Camara(self.nivel.jugador.sprite)
+
+    def actualizar_observaciones(self):
+        self.observaciones.clear()
+        j = self.nivel.jugador.sprite
+        for r in j.rayos:
+            self.observaciones.append(r.longitud_interp)
+            self.observaciones.append(r.objeto_impactado_interp)
+        self.observaciones.append(np.interp(j.velocidad.x, [-Jugador.VELOCIDAD_DASH, Jugador.VELOCIDAD_DASH], [-1.0, 1.0]))
+        self.observaciones.append(np.interp(j.velocidad.y, [Jugador.VELOCIDAD_SALTO, 0, Jugador.VELOCIDAD_TERMINAL], [-1.0, 0.0, 1.0]))
+
+    def actualizar_recompensas(self):
+        self.recompensa_step = 0
+        jugador = self.jugador
+
+        # RECOMPENSAS
+        # Avanzar 64 * 6 metros recompensa 15 puntos
+        if jugador.pos.x >= self.x_checkpoint:
+            self.x_checkpoint = jugador.pos.x + self.nivel.tam_bloque * 6
+            self.recompensa_step += 15.0
+
+        # Recoger una moneda recompensa 1 por moneda
+        self.recompensa_step += jugador.monedas_recogidas_frame * 1.0
+
+        # Matar a un enemigo haciendo (de cualquier manera) recompensa con 5 puntos
+        self.recompensa_step += jugador.asesinatos_frame * 5.0
+
+        # PENALIZACIONES
+        # Morir por un disparo enemigo penaliza 5 puntos
+        if jugador.disparado:
+            self.recompensa_step = -5.0
+
+        # Morir por contacto con un enemigo penaliza 10 puntos
+        if jugador.asesinado:
+            self.recompensa_step = -10.0
+
+        # Morir por caída o por pisar pinchos penaliza 20 puntos
+        if jugador.fuera_limites or jugador.pinchado:
+            self.recompensa_step = -20.0
+
+        self.recompensa_total += self.recompensa_step
 
 
 class Nivel:
@@ -231,7 +291,6 @@ class Nivel:
         self.monedas.empty()  # = SpatialHash()
         self.enemigos.empty()  # = SpatialHash()
         self.disparos.empty()  # = SpatialHash()
-        self.jugador.sprite.reset()
 
         semilla = np.random.randint(0, np.iinfo(np.int32).max)  # 2010757495  1641465674
         # semilla = 664581131   514453980  2013199340
@@ -304,6 +363,7 @@ class Nivel:
         self.generar_nivel()
 
         bloque_seguro = self.chunks["bloques"][0][0]
+        self.jugador.sprite.reset()
         self.jugador.sprite.pos.update(bloque_seguro.rect.centerx, bloque_seguro.rect.top)
 
         self.datos_nivel = datos_nivel
@@ -378,6 +438,7 @@ class Moneda(Sprite):
 class Entidad(Sprite):
     GRAVEDAD = 0.4
     VELOCIDAD_SALTO = -7
+    VELOCIDAD_TERMINAL = 50
 
     def __init__(self,
                  pos: pygame.Vector2,
@@ -441,6 +502,11 @@ class Entidad(Sprite):
 
         self.timer_salto = 0
 
+        self.asesinado = False
+        self.disparado = False
+        self.pinchado = False
+        self.fuera_limites = False
+
     def reset(self):
         super().reset()
 
@@ -481,8 +547,14 @@ class Entidad(Sprite):
 
         self.timer_salto = 0
 
+        self.asesinado = False
+        self.disparado = False
+        self.pinchado = False
+        self.fuera_limites = False
+
     def update(self, accion=None):
         if self.pos.y > self.nivel.trigger_vacio:  # 1000
+            self.fuera_limites = True
             self.kill()
 
         if self.activo:
@@ -557,6 +629,9 @@ class Entidad(Sprite):
         self.saltar()
         if self.afectado_por_gravedad:
             self.aplicar_gravedad()
+
+        if self.velocidad.y > self.VELOCIDAD_TERMINAL:
+            self.velocidad.y = self.VELOCIDAD_TERMINAL
 
     def mover(self):
         accion = self.input_mover
@@ -666,6 +741,7 @@ class Jugador(Tirador):
     VELOCIDAD_SALTO = -14  # -14
     VELOCIDAD_DOBLE_SALTO = int(VELOCIDAD_SALTO * 0.75)
     VELOCIDAD_X = 4
+    VELOCIDAD_DASH = 15
 
     def __init__(self, pos: pygame.Vector2, nivel: Nivel):
         super().__init__(pos, self.DIMENSION, self.COLOR, self.ORIENTACION_INICIAL, nivel, self.VELOCIDAD_X)
@@ -694,6 +770,9 @@ class Jugador(Tirador):
         # self.rayos.extend([Rayo(self, ang) for ang in np.linspace(3*np.pi/2, np.pi/2, 19)])
         # self.rayos = [Rayo(self, ang) for ang in np.linspace(-np.pi/2, np.pi/2, 9)]
 
+        self.asesinatos_frame = 0
+        self.monedas_recogidas_frame = 0
+
     def kill(self) -> None:
         self.activo = False
 
@@ -710,6 +789,8 @@ class Jugador(Tirador):
             r.reset()
 
     def update(self, accion=None):
+        self.asesinatos_frame = 0
+        self.monedas_recogidas_frame = 0
         super().update(accion)
         for r in self.rayos:
             r.actualizar()
@@ -728,17 +809,15 @@ class Jugador(Tirador):
             if self.timer_duracion_dash == 0:
                 self.dash_finalizado = True
 
-    def resolver_flags_y_timers(self):
-        pass
-
-        # Escalar
-        # if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
-        #     # Fenómeno curioso: esto tiende una velocidad de 0,8
-        #     # Llego a la conclusión de que un número n dividido entre 2 más un número m
-        #     # repetidamente tiende a 2m.
-        #     # n/2 + m -> 2m
-        #     # Por ejemplo: n/2 + 0,4 -> 0,8
-        #     self.velocidad.y /= 2
+    # def resolver_flags_y_timers(self):
+    #     # Escalar
+    #     if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
+    #         # Fenómeno curioso: esto tiende una velocidad de 0,8
+    #         # Llego a la conclusión de que un número n dividido entre 2 más un número m
+    #         # repetidamente tiende a 2m.
+    #         # n/2 + m -> 2m
+    #         # Por ejemplo: n/2 + 0,4 -> 0,8
+    #         self.velocidad.y /= 2
 
     def actualizar_animacion(self):
         self.image.fill(self.COLOR if not self.dash_iniciado else 'white')
@@ -772,7 +851,7 @@ class Jugador(Tirador):
 
         if self.dash_iniciado and not self.dash_finalizado:
             # print("DASH!")
-            self.velocidad.x = 15 * self.orientacion  # 15
+            self.velocidad.x = self.VELOCIDAD_DASH * self.orientacion  # 15
             self.velocidad.y = 0
         elif self.dash_iniciado and self.dash_finalizado:
             # print("Finalizo dash\n")
@@ -786,13 +865,16 @@ class Jugador(Tirador):
         super().calcular_colisiones_horizontales()
         moneda = pygame.sprite.spritecollideany(self, self.nivel.monedas)
         if moneda:
+            self.monedas_recogidas_frame += 1
             moneda.kill()
 
         enemigo = pygame.sprite.spritecollideany(self, self.nivel.enemigos)
         if enemigo:
             if self.dash_iniciado:
+                self.asesinatos_frame += 1
                 enemigo.kill()
             else:
+                self.asesinado = True
                 self.kill()
 
     def calcular_colisiones_verticales(self, objs_colision=None):
@@ -804,6 +886,7 @@ class Jugador(Tirador):
         if vy > 0:
             self.doble_salto = False
             if isinstance(obj, Pinchos):
+                self.pinchado = True
                 self.kill()
 
 
@@ -1005,11 +1088,13 @@ class Disparo(Entidad):
     def en_colision_horizontal(self, obj, vx):
         super().en_colision_horizontal(obj, vx)
         if isinstance(obj, Entidad):
+            obj.asesinado = True
             obj.kill()
 
     def en_colision_vertical(self, obj, vy):
         super().en_colision_vertical(obj, vy)
         if isinstance(obj, Entidad):
+            obj.asesinado = True
             obj.kill()
 
     def resolver_flags_y_timers(self):
@@ -1031,6 +1116,8 @@ class Rayo:
         8: 'black'  # vacío
     }
 
+    OBJETOS_INTERP = dict(zip(list(COLOR.keys()), np.interp(list(COLOR.keys()), [0, 8], [-1.0, 1.0])))
+
     def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*14):
         self.entidad = entidad
         self.x1 = entidad.pos.x
@@ -1040,9 +1127,10 @@ class Rayo:
         self.y2 = entidad.pos.y
         self.longitud_maxima = longitud_maxima
         self.longitud = longitud_maxima
-        self.longitud_interp = 1
+        self.longitud_interp = 1.0
         self.flag_interseccion = False
         self.objeto_impactado = 0
+        self.objeto_impactado_interp = 0.0
         self.rayo_bajo = self.ang < np.pi
 
     def reset(self):
@@ -1051,9 +1139,11 @@ class Rayo:
         self.x2 = self.entidad.pos.x
         self.y2 = self.entidad.pos.y
         self.longitud = self.longitud_maxima
-        self.longitud_interp = 1
+        self.longitud_interp = 1.0
         self.flag_interseccion = False
         self.objeto_impactado = 0
+        self.objeto_impactado_interp = 0.0
+        self.actualizar()
 
     def actualizar(self):
         def interseccion(x1, y1, x2, y2, x3, y3, x4, y4):
@@ -1106,7 +1196,7 @@ class Rayo:
         if pts_corte:
             self.x2, self.y2 = pts_corte
             self.longitud = dist_min * self.longitud_maxima
-            self.longitud_interp = np.interp(self.longitud, [0, self.longitud_maxima], [-1, 1])
+            self.longitud_interp = np.interp(self.longitud, [0, self.longitud_maxima], [-1.0, 1.0])
             self.flag_interseccion = True
             self.objeto_impactado = 2 if isinstance(objeto, Pinchos) else 1 if isinstance(objeto, Bloque) else \
                 5 if isinstance(objeto, Moneda) else \
@@ -1114,9 +1204,11 @@ class Rayo:
                 6 if isinstance(objeto, Disparo) else 3 if isinstance(objeto, EnemigoSaltarin) else 4
         else:
             self.longitud = self.longitud_maxima
-            self.longitud_interp = 1
+            self.longitud_interp = 1.0
             self.flag_interseccion = False
             self.objeto_impactado = 0 if not self.rayo_bajo else 8
+
+        self.objeto_impactado_interp = self.OBJETOS_INTERP[self.objeto_impactado]
 
     def render(self, ventana, offset):
         """
@@ -1154,7 +1246,7 @@ class SpatialHash(pygame.sprite.AbstractGroup):
 
 class SpatialHashSingle(pygame.sprite.GroupSingle):
     @property
-    def sprite(self) -> Sprite:
+    def sprite(self) -> Union[Sprite, Jugador]:
         """
         Property for the single sprite contained in this group
 
