@@ -1,9 +1,9 @@
-from typing import Optional
+from typing import Optional, Union
 
 import gym
 import numpy as np
 import pygame
-
+from pygame.rect import RectType, Rect
 
 ANCHO = 1280
 ALTO = 700
@@ -25,7 +25,7 @@ class Camara:
 
 
 class Juego(gym.Env):
-    def __init__(self):
+    def __init__(self, env_config=None):
         self.nivel = Nivel()
         # self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
         # self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
@@ -36,11 +36,19 @@ class Juego(gym.Env):
         self.flag_iniciar_render = True
         self.flag_reset = True
 
+        self.action_space = gym.spaces.Box(low=np.array([-1, 0, -1, 0]), high=np.array([1, 1, 1, 1]),
+                                           shape=(4,), dtype=int)
+        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.nivel.jugador.sprite.rayos)*2+2,))
+
+        print(self.action_space.sample())
+        print(self.observation_space.sample())
+
     def step(self, action):
         self.nivel.update()
         self.nivel.jugador.update(action)
 
         if not self.nivel.jugador.sprite.activo:
+            print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
             self.reset()
 
     def render(self, mode="human"):
@@ -93,15 +101,16 @@ class Nivel:
         self.disparos = SpatialHash()
         self.jugador = SpatialHashSingle(Jugador(pygame.Vector2(64, 0), self))  # 64, 398
 
+        self.tam_bloque = 64
         self.max_y = 40
         self.min_y = 3
+        self.trigger_vacio = (self.max_y+2)*self.tam_bloque
 
         self.ultima_x = 0
-        self.ultima_y = 8
+        self.ultima_y = 0
         self.step_generacion = 0  # 10 * tam_bloque
 
         self.datos_nivel = []
-        self.tam_bloque = 64
 
         self.zona_seguridad = self.tam_bloque * 4
 
@@ -128,8 +137,6 @@ class Nivel:
         monedas = []
         enemigos = []
 
-        bloque_ant = None
-
         for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
             # x = x * tam_bloque
             if np.random.random() < 0.9 or x <= self.zona_seguridad:  # 80% de suelo, 20% de vacío
@@ -155,11 +162,11 @@ class Nivel:
                 self.bloques.add(bloque)
 
                 if np.random.random() < 0.05 and x > self.zona_seguridad:
-                    enemigo = EnemigoSaltarin(pygame.Vector2(bloque.rect.centerx, bloque.rect.top), self, 1 if np.random.random() < 0.5 else -1)
+                    enemigo = EnemigoSaltarin(pygame.Vector2(bloque.rect.centerx, bloque.rect.top - EnemigoSaltarin.DIMENSION[1]), self, 1 if np.random.random() < 0.5 else -1)
                     enemigos.append(enemigo)
                     self.enemigos.add(enemigo)
                 if np.random.random() < 0.025 and x > self.zona_seguridad:
-                    enemigo = EnemigoTirador(pygame.Vector2(bloque.rect.centerx, bloque.rect.top), self, 1 if np.random.random() < 0.5 else -1)
+                    enemigo = EnemigoTirador(pygame.Vector2(bloque.rect.centerx, bloque.rect.top - EnemigoTirador.DIMENSION[1]), self, 1 if np.random.random() < 0.5 else -1)
                     enemigos.append(enemigo)
                     self.enemigos.add(enemigo)
 
@@ -178,7 +185,7 @@ class Nivel:
                 y_plat = np.clip(np.random.randint(y_actual - dec_altura, y_actual - 3 + 1), y_min, y_max)
                 anchura = np.random.randint(3, 6)
                 for i in range(1, anchura):
-                    bloque = Bloque(pygame.Vector2(x+i*tam_bloque, y_plat * tam_bloque), tam_bloque + 1, 'yellow')
+                    bloque = Bloque(pygame.Vector2(x+i*tam_bloque, y_plat * tam_bloque), tam_bloque + 1)  # 'yellow'
                     bloques.append(bloque)
                     self.bloques.add(bloque)
                     for y in range(np.random.randint(1, 4)):
@@ -395,6 +402,7 @@ class Entidad(Sprite):
 
         # Indica la orientación horizontal, 1 si mira hacia la derecha o -1 si mira hacia la izquierda
         self.orientacion = orientacion
+        self.orientacion_original = orientacion
 
         # Le afecta la gravedad, por lo que cae en función de la velocidad cada actualización
         self.afectado_por_gravedad = True
@@ -433,7 +441,50 @@ class Entidad(Sprite):
 
         self.timer_salto = 0
 
+    def reset(self):
+        super().reset()
+
+        self.velocidad = pygame.Vector2()
+
+        # Inputs de accciones
+        self.input_mover = 0
+        self.input_saltar = 0
+
+        # Acción que realiza una Entidad en un instante
+        self.accion = None
+
+        # Indica la orientación horizontal, 1 si mira hacia la derecha o -1 si mira hacia la izquierda
+        self.orientacion = self.orientacion_original
+
+        # Flag que indica si hay colisión horizontal en esta actualización
+        self.flag_colision_horizontal = False
+
+        # Flag que indica si hay colisión vertical en esta actualización
+        self.flag_colision_vertical = False
+
+        # Indica si la entidad se encuentra apoyada en el suelo
+        self.en_suelo = False
+
+        # Indica si la entidad ha colisionado alguna vez con otro sprite, ayudando a la detección del flag anterior
+        self.ha_colisionado = False
+
+        # Indica si la entidad está realizando un salto
+        self.saltando = False
+
+        # Indica si la entidad está cayendo (preferible a consultar velocidad.y)
+        self.cayendo = False
+
+        # Indica si existe alguna animación activa en este instante
+        self.animacion_activa = False
+
+        self.cooldown_salto = 20
+
+        self.timer_salto = 0
+
     def update(self, accion=None):
+        if self.pos.y > self.nivel.trigger_vacio:  # 1000
+            self.kill()
+
         if self.activo:
             self.seleccionar_accion(accion)
             accion = self.accion
@@ -598,12 +649,14 @@ class Tirador(Entidad):
             self.timer_disparo -= 1
 
     def disparar(self):
-        accion = self.input_disparar
-        if accion and self.timer_disparo == 0:
-            # print("PUM")
-            self.timer_disparo = self.cooldown_disparo
-            self.nivel.disparos.add(Disparo(self.pos.copy(), self.orientacion, self.groups()[0],
-                                            self.nivel))
+        if self.timer_disparo == 0:
+            if self.input_disparar == 1:
+                # print("PUM")
+                self.timer_disparo = self.cooldown_disparo
+                self.nivel.disparos.add(Disparo(self.rect, self.velocidad, self.orientacion, self.groups()[0], self.nivel))
+            elif self.input_disparar == -1:
+                self.timer_disparo = self.cooldown_disparo
+                self.nivel.disparos.add(Disparo(self.rect, self.velocidad, Disparo.ORIENTACION_ABAJO, self.groups()[0], self.nivel))
 
 
 class Jugador(Tirador):
@@ -646,17 +699,18 @@ class Jugador(Tirador):
 
     def reset(self):
         super().reset()
-        self.orientacion = 1
-        self.velocidad.update(0, 0)
-        self.ha_colisionado = False
+
+        self.doble_salto = False
         self.dash_iniciado = False
         self.dash_finalizado = False
-        self.animacion_activa = False
+        self.timer_cooldown_dash = 0
+        self.timer_duracion_dash = 0
+
+        for r in self.rayos:
+            r.reset()
 
     def update(self, accion=None):
         super().update(accion)
-        if self.pos.y > 2560:  # 1000
-            self.kill()
         for r in self.rayos:
             r.actualizar()
 
@@ -675,13 +729,16 @@ class Jugador(Tirador):
                 self.dash_finalizado = True
 
     def resolver_flags_y_timers(self):
-        if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
-            # Fenómeno curioso: esto tiende una velocidad de 0,8
-            # Llego a la conclusión de que un número n dividido entre 2 más un número m
-            # repetidamente tiende a 2m.
-            # n/2 + m -> 2m
-            # Por ejemplo: n/2 + 0,4 -> 0,8
-            self.velocidad.y /= 2
+        pass
+
+        # Escalar
+        # if self.flag_colision_horizontal and self.cayendo and not self.doble_salto:
+        #     # Fenómeno curioso: esto tiende una velocidad de 0,8
+        #     # Llego a la conclusión de que un número n dividido entre 2 más un número m
+        #     # repetidamente tiende a 2m.
+        #     # n/2 + m -> 2m
+        #     # Por ejemplo: n/2 + 0,4 -> 0,8
+        #     self.velocidad.y /= 2
 
     def actualizar_animacion(self):
         self.image.fill(self.COLOR if not self.dash_iniciado else 'white')
@@ -753,9 +810,10 @@ class Jugador(Tirador):
 class EnemigoDeambulante(Entidad):
     VELOCIDAD_SALTO = -9
     COLOR = 'brown'
+    DIMENSION = (50, 30)
 
     def __init__(self, pos: pygame.Vector2, nivel: Nivel):
-        super().__init__(pos, (50, 30), self.COLOR, -1, nivel, 1)
+        super().__init__(pos, self.DIMENSION, self.COLOR, -1, nivel, 1)
 
     def determinar_accion(self):
         if self.flag_colision_horizontal:
@@ -773,9 +831,10 @@ class EnemigoDeambulante(Entidad):
 class EnemigoSaltarin(Entidad):
     VELOCIDAD_SALTO = -9
     COLOR = 'darkred'
+    DIMENSION = (50, 30)
 
     def __init__(self, pos: pygame.Vector2, nivel: Nivel, orientacion=-1):
-        super().__init__(pos, (50, 30), self.COLOR, orientacion, nivel, 1)
+        super().__init__(pos, self.DIMENSION, self.COLOR, orientacion, nivel, 1)
         self.prev_x = self.pos.x
         self.intentar_salto = False
 
@@ -810,9 +869,10 @@ class EnemigoSaltarin(Entidad):
 class EnemigoTirador(Tirador):
     COLOR = 'darkred'
     VELOCIDAD_SALTO = -9
+    DIMENSION = (32, 50)
 
     def __init__(self, pos: pygame.Vector2, nivel: Nivel, orientacion=-1):
-        super().__init__(pos, (32, 50), self.COLOR, orientacion, nivel, 1)
+        super().__init__(pos, self.DIMENSION, self.COLOR, orientacion, nivel, 1)
         self.prev_x = self.pos.x
         self.intentar_salto = False
 
@@ -820,7 +880,7 @@ class EnemigoTirador(Tirador):
         self.rafaga = 3
         self.cooldown_rafaga = 60 * 5
         self.cooldown_disparo = self.cooldown_disparo * 1.2
-        self.timer_rafaga = self.cooldown_rafaga // 2
+        self.timer_rafaga = np.random.randint(self.cooldown_rafaga//2, self.cooldown_rafaga)
 
     def actualizar_timers(self):
         super().actualizar_timers()
@@ -864,25 +924,62 @@ class EnemigoTirador(Tirador):
 
 
 class Disparo(Entidad):
-    DIMENSION = (16, 8)
+    DIMENSION_HOR = (16, 8)
+    DIMENSION_VER = (8, 16)
     COLOR = 'white'
     VELOCIDAD_X = 16
-    ACCION_1 = [1, 0, 0, 0]
-    ACCION_2 = [-1, 0, 0, 0]
+    VELOCIDAD_Y = 8
+    ACCION_IZQ = [-1, 0]
+    ACCION_DER = [1, 0]
+    ACCION_ABAJO = [0, 0]
 
-    def __init__(self, pos: pygame.Vector2, orientacion, grupo: pygame.sprite.AbstractGroup, nivel: Nivel):
-        super().__init__(pos, self.DIMENSION, self.COLOR, orientacion, nivel,
-                         self.VELOCIDAD_X, self.ACCION_1 if orientacion == 1 else self.ACCION_2)
+    ORIENTACION_IZQ = -1
+    ORIENTACION_ABAJO = 0
+    ORIENTACION_DER = 1
 
-        self.comprobar_colisiones_verticales = False
-        self.afectado_por_gravedad = False
+    def __init__(self, rect: Union[Rect, RectType], vel: pygame.Vector2, orientacion: int, grupo: pygame.sprite.AbstractGroup, nivel: Nivel):
+        self.bala_vertical = orientacion == self.ORIENTACION_ABAJO
+        super().__init__(pygame.Vector2(rect.center),
+                         self.DIMENSION_HOR if not self.bala_vertical else self.DIMENSION_VER,
+                         self.COLOR,
+                         orientacion,
+                         nivel,
+                         self.VELOCIDAD_X if not self.bala_vertical else 0,
+                         self.ACCION_IZQ if orientacion == self.ORIENTACION_IZQ else
+                         self.ACCION_DER if orientacion == self.ORIENTACION_DER else self.ACCION_ABAJO)
+
+        copia_rect, self.rect.bottom = self.rect.copy(), rect.centery  # pos.y
+        self.pos.y = self.rect.centery
+
+        if self.orientacion == self.ORIENTACION_DER:
+            self.rect.left = rect.right
+            self.pos.x = rect.right
+            self.rect.centery += 4
+        elif self.orientacion == self.ORIENTACION_IZQ:
+            self.rect.right = rect.left
+            self.pos.x = self.rect.left
+            self.rect.centery += 4
+        else:
+            self.rect.centerx = rect.centerx
+            self.pos.x -= self.DIMENSION_VER[0]/2
+
+            self.rect.top = rect.bottom
+            self.pos.y = self.rect.y
+
+            self.velocidad.y = self.VELOCIDAD_Y + max(0.0, vel.y)
+
+        self.comprobar_colisiones_verticales = self.bala_vertical
+        self.comprobar_colisiones_horizontales = not self.bala_vertical
+        self.afectado_por_gravedad = self.bala_vertical
         self.grupo = grupo
         self.distancia_recorrida = 0.0
 
     def update(self, accion=None):
-        x_ant = self.pos.x
+        # print(self.pos, self.rect, self.rect.left, self.rect.right, self.rect.centerx, self.rect.x)
+        # print(self.pos, self.rect, self.rect.top, self.rect.bottom, self.rect.centery, self.rect.y)
+        pos_ant = self.pos.x if not self.bala_vertical else self.pos.y
         super().update()
-        self.distancia_recorrida += abs(self.pos.x - x_ant)
+        self.distancia_recorrida += abs(self.pos.x - pos_ant) if not self.bala_vertical else abs(self.pos.y - pos_ant)
 
         if self.distancia_recorrida > 64 * 20:
             self.kill()
@@ -896,25 +993,42 @@ class Disparo(Entidad):
             self.flag_colision_horizontal = True
             self.en_colision_horizontal(enemigo, self.velocidad.x)
 
+    def calcular_colisiones_verticales(self, objs_colision=None):
+        super().calcular_colisiones_verticales()
+        if self.grupo != self.nivel.jugador and (jugador := pygame.sprite.spritecollideany(self, self.nivel.jugador)):
+            self.flag_colision_horizontal = True
+            self.en_colision_vertical(jugador, self.velocidad.y)
+        elif self.grupo != self.nivel.enemigos and (enemigo := pygame.sprite.spritecollideany(self, self.nivel.enemigos)):
+            self.flag_colision_horizontal = True
+            self.en_colision_vertical(enemigo, self.velocidad.y)
+
     def en_colision_horizontal(self, obj, vx):
         super().en_colision_horizontal(obj, vx)
         if isinstance(obj, Entidad):
             obj.kill()
 
+    def en_colision_vertical(self, obj, vy):
+        super().en_colision_vertical(obj, vy)
+        if isinstance(obj, Entidad):
+            obj.kill()
+
     def resolver_flags_y_timers(self):
         super().resolver_flags_y_timers()
-        if self.flag_colision_horizontal:
+        if self.flag_colision_horizontal or self.flag_colision_vertical:
             self.kill()
 
 
 class Rayo:
     COLOR = {
-        0: (255, 255, 255),
-        1: 'darkgreen',
-        2: (255, 0, 0),
-        3: 'yellow',
-        4: 'blue',
-        5: 'red'
+        0: (255, 255, 255),  # vacío
+        1: 'darkgreen',  # bloque
+        2: 'red',  # pinchos
+        3: 'darkred',  # saltarín
+        4: (153, 35, 35),  # tirador
+        5: 'yellow',  # moneda
+        6: 'blue',  # disparo jugador
+        7: 'violet',  # disparo enemigo
+        8: 'black'  # vacío
     }
 
     def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*14):
@@ -926,6 +1040,17 @@ class Rayo:
         self.y2 = entidad.pos.y
         self.longitud_maxima = longitud_maxima
         self.longitud = longitud_maxima
+        self.longitud_interp = 1
+        self.flag_interseccion = False
+        self.objeto_impactado = 0
+        self.rayo_bajo = self.ang < np.pi
+
+    def reset(self):
+        self.x1 = self.entidad.pos.x
+        self.y1 = self.entidad.pos.y
+        self.x2 = self.entidad.pos.x
+        self.y2 = self.entidad.pos.y
+        self.longitud = self.longitud_maxima
         self.longitud_interp = 1
         self.flag_interseccion = False
         self.objeto_impactado = 0
@@ -983,13 +1108,15 @@ class Rayo:
             self.longitud = dist_min * self.longitud_maxima
             self.longitud_interp = np.interp(self.longitud, [0, self.longitud_maxima], [-1, 1])
             self.flag_interseccion = True
-            self.objeto_impactado = 5 if isinstance(objeto, Pinchos) else 1 if isinstance(objeto, Bloque) else 3 if isinstance(objeto, Moneda) else \
-                4 if isinstance(objeto, Disparo) else 2
+            self.objeto_impactado = 2 if isinstance(objeto, Pinchos) else 1 if isinstance(objeto, Bloque) else \
+                5 if isinstance(objeto, Moneda) else \
+                7 if isinstance(objeto, Disparo) and objeto.grupo != objeto.nivel.jugador else \
+                6 if isinstance(objeto, Disparo) else 3 if isinstance(objeto, EnemigoSaltarin) else 4
         else:
             self.longitud = self.longitud_maxima
             self.longitud_interp = 1
             self.flag_interseccion = False
-            self.objeto_impactado = 0
+            self.objeto_impactado = 0 if not self.rayo_bajo else 8
 
     def render(self, ventana, offset):
         """

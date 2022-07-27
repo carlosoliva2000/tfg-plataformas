@@ -25,6 +25,8 @@ def manejar_entrada(teclas):
         accion_dash = 1
     if teclas[pygame.KSCAN_N]:
         accion_disparar = 1
+    if teclas[pygame.KSCAN_M]:
+        accion_disparar = -1
     if teclas[pygame.KSCAN_LEFT] or teclas[pygame.KSCAN_A]:
         accion_mover += -1
     if teclas[pygame.KSCAN_RIGHT] or teclas[pygame.KSCAN_D]:
@@ -83,7 +85,8 @@ def main():
         #     print(lista.index(True))
 
         # Acción random
-        # accion = [np.random.randint(-1, 2), np.random.randint(0, 2), np.random.randint(0, 2), np.random.randint(0, 2)]
+        # accion = [np.random.randint(-1, 2), np.random.randint(0, 2),
+        #           np.random.randint(-1, 2), np.random.randint(0, 2)]
 
         juego.step(accion)
         juego.render()
