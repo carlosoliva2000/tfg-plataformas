@@ -1,0 +1,8 @@
+{
+  "env": "<class 'plataformas.Juego'>",
+  "evaluation_config": {
+    "render_env": true
+  },
+  "num_workers": 4,
+  "render_env": true
+}

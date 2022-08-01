@@ -50,6 +50,7 @@ def main():
     pygame.init()
     clock = pygame.time.Clock()
     juego = Juego()
+    juego.juega_humano = True
     # juego.inicializar_render()
 
     flag_grabacion = True
@@ -90,6 +91,10 @@ def main():
 
         juego.step(accion)
         juego.render()
+
+        if juego.done:
+            juego.reset()
+
         clock.tick(60)
 
         # frames += 1

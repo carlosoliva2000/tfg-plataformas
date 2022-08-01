@@ -35,35 +35,91 @@ class Juego(gym.Env):
         self.ventana = None
         self.flag_iniciar_render = True
         self.flag_reset = True
+        self.juega_humano = False
 
-        self.action_space = gym.spaces.Box(low=np.array([-1, 0, -1, 0]), high=np.array([1, 1, 1, 1]),
-                                           shape=(4,), dtype=int)
-        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.nivel.jugador.sprite.rayos)*2+2,))
+        self.action_space = gym.spaces.Discrete(7)  # 36 3**2 + 3**3
+        # gym.spaces.Box(low=np.array([-1, 0, -1, 0]), high=np.array([1, 1, 1, 1]), shape=(4,), dtype=int)
+        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.jugador.rayos)*2+9,))
 
         self.observaciones = []
         self.recompensa_total = 0.0
         self.recompensa_step = 0.0
 
+        self.done = False
+
         self.x_checkpoint = self.nivel.jugador.sprite.pos.x + self.nivel.tam_bloque * 6
+
+        # self.acciones = {
+        #     0: [0, 0, 0, 0],
+        #     1: [0, 0, 0, 1],
+        #     2: [0, 0, 1, 0],
+        #     3: [0, 0, 1, 1],
+        #     4: [0, 0, -1, 0],
+        #     5: [0, 0, -1, 1],
+        #     6: [0, 1, 0, 0],
+        #     7: [0, 1, 0, 1],
+        #     8: [0, 1, 1, 0],
+        #     9: [0, 1, 1, 1],
+        #     10: [0, 1, -1, 0],
+        #     11: [0, 1, -1, 1],
+        #     12: [1, 0, 0, 0],
+        #     13: [1, 0, 0, 1],
+        #     14: [1, 0, 1, 0],
+        #     15: [1, 0, 1, 1],
+        #     16: [1, 0, -1, 0],
+        #     17: [1, 0, -1, 1],
+        #     18: [1, 1, 0, 0],
+        #     19: [1, 1, 0, 1],
+        #     20: [1, 1, 1, 0],
+        #     21: [1, 1, 1, 1],
+        #     22: [1, 1, -1, 0],
+        #     23: [1, 1, -1, 1],
+        #     24: [-1, 0, 0, 0],
+        #     25: [-1, 0, 0, 1],
+        #     26: [-1, 0, 1, 0],
+        #     27: [-1, 0, 1, 1],
+        #     28: [-1, 0, -1, 0],
+        #     29: [-1, 0, -1, 1],
+        #     30: [-1, 1, 0, 0],
+        #     31: [-1, 1, 0, 1],
+        #     32: [-1, 1, 1, 0],
+        #     33: [-1, 1, 1, 1],
+        #     34: [-1, 1, -1, 0],
+        #     35: [-1, 1, -1, 1],
+        # }
+
+        # Desplazamiento (-1, 0, 1), salto (0, 1), disparo (-1, 0, 1), dash(0, 1)
+        self.acciones = {
+            0: [0, 0, 0, 0],
+            1: [1, 0, 0, 0],
+            2: [-1, 0, 0, 0],
+            3: [0, 1, 0, 0],
+            4: [0, 0, 1, 0],
+            5: [0, 0, -1, 0],
+            6: [0, 0, 0, 1]
+        }
 
     @property
     def jugador(self):
         return self.nivel.jugador.sprite
 
     def step(self, action):
+        action = self.procesar_accion(action)
         self.nivel.update()
         self.nivel.jugador.update(action)
 
         self.actualizar_observaciones()
         self.actualizar_recompensas()
 
-        if not self.nivel.jugador.sprite.activo:
-            print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
-            info_step = self.observaciones, self.recompensa_step, True, {}
-            self.reset()
-            return info_step
+        self.done = not self.nivel.jugador.sprite.activo
 
-        return self.observaciones, self.recompensa_step, False, {}
+        # if not self.nivel.jugador.sprite.activo:
+        #     print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
+        #     info_step = self.observaciones, self.recompensa_step, True, {}
+        #     self.reset()
+        #     return info_step
+
+        return self.observaciones, self.recompensa_step, not self.nivel.jugador.sprite.activo, {}
 
     def render(self, mode="human"):
         if self.flag_iniciar_render:
@@ -85,6 +141,9 @@ class Juego(gym.Env):
         pygame.display.update()
 
     def reset(self):
+        print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
+        print()
+
         self.flag_reset = True
         self.nivel.reset()
 
@@ -112,7 +171,14 @@ class Juego(gym.Env):
             self.observaciones.append(r.longitud_interp)
             self.observaciones.append(r.objeto_impactado_interp)
         self.observaciones.append(np.interp(j.velocidad.x, [-Jugador.VELOCIDAD_DASH, Jugador.VELOCIDAD_DASH], [-1.0, 1.0]))
-        self.observaciones.append(np.interp(j.velocidad.y, [Jugador.VELOCIDAD_SALTO, 0, Jugador.VELOCIDAD_TERMINAL], [-1.0, 0.0, 1.0]))
+        self.observaciones.append(np.interp(j.velocidad.y if not j.en_suelo else 0.0, [Jugador.VELOCIDAD_SALTO, 0, Jugador.VELOCIDAD_TERMINAL], [-1.0, 0.0, 1.0]))
+        self.observaciones.append(float(j.orientacion))
+        self.observaciones.append(np.interp(self.x_checkpoint - j.pos.x, [0, 384, 384*3], [1.0, 0.0, -1.0]))
+        self.observaciones.append(1.0 if j.puede_saltar else -1.0)
+        self.observaciones.append(1.0 if j.puede_doble_saltar else -1.0)
+        self.observaciones.append(1.0 if j.puede_disparar else -1.0)
+        self.observaciones.append(1.0 if j.puede_dashear else -1.0)
+        self.observaciones.append(1.0 if j.animacion_activa else -1.0)
 
     def actualizar_recompensas(self):
         self.recompensa_step = 0
@@ -122,7 +188,7 @@ class Juego(gym.Env):
         # Avanzar 64 * 6 metros recompensa 15 puntos
         if jugador.pos.x >= self.x_checkpoint:
             self.x_checkpoint = jugador.pos.x + self.nivel.tam_bloque * 6
-            self.recompensa_step += 15.0
+            self.recompensa_step += 10.0
 
         # Recoger una moneda recompensa 1 por moneda
         self.recompensa_step += jugador.monedas_recogidas_frame * 1.0
@@ -131,19 +197,41 @@ class Juego(gym.Env):
         self.recompensa_step += jugador.asesinatos_frame * 5.0
 
         # PENALIZACIONES
+        # Disparar sin ningún motivo (no hay enemigos a la vista)
+        enemigos_en_vista = False
+        if jugador.ha_disparado:
+            for r in jugador.rayos:
+                if r.objeto_impactado == 3 or r.objeto_impactado == 4:
+                    enemigos_en_vista = True
+                    break
+            if not enemigos_en_vista:
+                self.recompensa_step -= 0.5
+
+        # Caer al vacío
+        caida_libre = True
+        for r in jugador.rayos:
+            if r.rayo_bajo and (r.objeto_impactado == 1 or r.objeto_impactado == 2 or r.objeto_impactado == 5):
+                caida_libre = False
+                break
+        if caida_libre:
+            self.recompensa_step -= 0.5
+
         # Morir por un disparo enemigo penaliza 5 puntos
         if jugador.disparado:
-            self.recompensa_step = -5.0
+            self.recompensa_step -= 2.0
 
         # Morir por contacto con un enemigo penaliza 10 puntos
         if jugador.asesinado:
-            self.recompensa_step = -10.0
+            self.recompensa_step -= 2.0
 
         # Morir por caída o por pisar pinchos penaliza 20 puntos
         if jugador.fuera_limites or jugador.pinchado:
-            self.recompensa_step = -20.0
+            self.recompensa_step -= 2.0
 
         self.recompensa_total += self.recompensa_step
+
+    def procesar_accion(self, accion):
+        return accion if self.juega_humano else self.acciones[accion]
 
 
 class Nivel:
@@ -357,7 +445,6 @@ class Nivel:
         self.ultima_x = 0
         self.ultima_y = np.random.randint(self.min_y, self.max_y)
         print(f"Altura inicial: {self.ultima_y}")
-        print()
         self.step_generacion = 10 * tam_bloque
 
         self.generar_nivel()
@@ -502,6 +589,8 @@ class Entidad(Sprite):
 
         self.timer_salto = 0
 
+        self.puede_saltar = False
+
         self.asesinado = False
         self.disparado = False
         self.pinchado = False
@@ -542,8 +631,6 @@ class Entidad(Sprite):
 
         # Indica si existe alguna animación activa en este instante
         self.animacion_activa = False
-
-        self.cooldown_salto = 20
 
         self.timer_salto = 0
 
@@ -608,6 +695,8 @@ class Entidad(Sprite):
             self.en_suelo = not self.cayendo and not self.saltando
         else:
             self.en_suelo = False
+
+        self.puede_saltar = self.en_suelo and not self.saltando
 
     def actualizar_timers(self):
         if self.timer_salto > 0 and self.saltando:
@@ -710,6 +799,9 @@ class Tirador(Entidad):
         self.cooldown_disparo = 20
         self.timer_disparo = 0
 
+        self.ha_disparado = False
+        self.puede_disparar = False
+
     def manejar_input_acciones(self, accion):
         super().manejar_input_acciones(accion)
         self.input_disparar = accion[2]
@@ -717,6 +809,11 @@ class Tirador(Entidad):
     def aplicar_acciones(self):
         super().aplicar_acciones()
         self.disparar()
+
+    def actualizar_flags(self):
+        super().actualizar_flags()
+        self.ha_disparado = self.timer_disparo == self.cooldown_disparo and self.input_disparar
+        self.puede_disparar = self.timer_disparo <= 1
 
     def actualizar_timers(self):
         super().actualizar_timers()
@@ -773,6 +870,10 @@ class Jugador(Tirador):
         self.asesinatos_frame = 0
         self.monedas_recogidas_frame = 0
 
+        self.en_suelo = True
+        self.puede_saltar = self.puede_disparar = True
+        self.puede_doble_saltar = self.puede_dashear = True
+
     def kill(self) -> None:
         self.activo = False
 
@@ -784,6 +885,11 @@ class Jugador(Tirador):
         self.dash_finalizado = False
         self.timer_cooldown_dash = 0
         self.timer_duracion_dash = 0
+        self.asesinatos_frame = 0
+        self.monedas_recogidas_frame = 0
+        self.en_suelo = True
+        self.puede_saltar = self.puede_disparar = True
+        self.puede_doble_saltar = self.puede_dashear = True
 
         for r in self.rayos:
             r.reset()
@@ -798,6 +904,12 @@ class Jugador(Tirador):
     def manejar_input_acciones(self, accion):
         super().manejar_input_acciones(accion)
         self.input_dash = accion[3]
+
+    def actualizar_flags(self):
+        super().actualizar_flags()
+        self.puede_doble_saltar = self.saltando and not self.doble_salto
+        self.puede_dashear = not self.dash_iniciado and self.timer_cooldown_dash <= 1
+        self.puede_disparar = self.puede_disparar and not self.dash_iniciado
 
     def actualizar_timers(self):
         super().actualizar_timers()
@@ -839,6 +951,10 @@ class Jugador(Tirador):
             elif not self.doble_salto and not self.timer_salto:
                 self.velocidad.y = self.VELOCIDAD_DOBLE_SALTO
                 self.doble_salto = True
+
+    def disparar(self):
+        if not self.dash_iniciado:
+            super().disparar()
 
     def dashear(self):
         accion = self.input_dash
@@ -1111,9 +1227,9 @@ class Rayo:
         3: 'darkred',  # saltarín
         4: (153, 35, 35),  # tirador
         5: 'yellow',  # moneda
-        6: 'blue',  # disparo jugador
-        7: 'violet',  # disparo enemigo
-        8: 'black'  # vacío
+        6: 'violet',  # disparo jugador
+        7: 'blue',  # disparo enemigo
+        8: 'black'  # fondo
     }
 
     OBJETOS_INTERP = dict(zip(list(COLOR.keys()), np.interp(list(COLOR.keys()), [0, 8], [-1.0, 1.0])))
@@ -1172,6 +1288,9 @@ class Rayo:
         objeto = None
         for bloque in (*self.entidad.nivel.pinchos, *self.entidad.nivel.bloques, *self.entidad.nivel.enemigos,
                        *self.entidad.nivel.monedas, *self.entidad.nivel.disparos):
+            if isinstance(bloque, Disparo) and bloque.grupo == bloque.nivel.jugador:
+                continue
+
             b = bloque.rect
             dist_min_borde = 1
             res_bloque = None
