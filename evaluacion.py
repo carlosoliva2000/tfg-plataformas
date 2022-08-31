@@ -18,7 +18,7 @@ def main():
                              # "--save-info "
                              # ¡Esta ruta debe apuntar al checkpoint que se quiera evaluar!
                              ".\\resultados\\DQN\\"
-                             "DQN_Juego_af76a_00000_0_2022-08-01_13-04-17\\checkpoint_004300\\checkpoint-4300"
+                             "DQN_Juego_63f27_00000_0_2022-08-31_01-06-33\\checkpoint_004500\\checkpoint-4500"
                              .split())
 
     evaluate.run(args, parser)

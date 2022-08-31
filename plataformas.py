@@ -36,18 +36,54 @@ class Juego(gym.Env):
         self.flag_iniciar_render = True
         self.flag_reset = True
         self.juega_humano = False
+        # 36 3**2 + 3**3
 
-        self.action_space = gym.spaces.Discrete(7)  # 36 3**2 + 3**3
-        # gym.spaces.Box(low=np.array([-1, 0, -1, 0]), high=np.array([1, 1, 1, 1]), shape=(4,), dtype=int)
-        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.jugador.rayos)*2+9,))
+        self.action_space = gym.spaces.Discrete(7)
+        self.observation_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(len(self.jugador.rayos)*2+9+5,))
 
         self.observaciones = []
-        self.recompensa_total = 0.0
-        self.recompensa_step = 0.0
+        self.observaciones_array = np.array([])
 
         self.done = False
+        self.caida_libre = False
 
-        self.x_checkpoint = self.nivel.jugador.sprite.pos.x + self.nivel.tam_bloque * 6
+        self.bloque_final = 100.0
+        self.x_final = self.nivel.tam_bloque * self.bloque_final  # 0.0
+        self.x_checkpoint = self.nivel.tam_bloque * 1  # self.nivel.jugador.sprite.pos.x +
+
+        self.recompensa_total = 0.0
+        self.recompensa_step = 0.0
+        self.recompensa_max = self.bloque_final
+
+        self.rango_recompensa_avanzar = [0.0, 1.0]
+        self.rango_recompensa_moneda = [-1.0, 1.0]
+        self.rango_recompensa_dash = [-1.0, 1.5]
+        self.rango_recompensa_tirador = [-1.0, 2.0]
+        self.rango_recompensa_bombardeador = [-1.0, 2.0]
+
+        self.recompensa_avanzar = 0.0
+        self.recompensa_moneda = 1.0
+        self.recompensa_dash = -1.0
+        self.recompensa_tirador = -1.0
+        self.recompensa_bombardeador = -1.0
+
+        self.recompensa_avanzar_interp = -1.0
+        self.recompensa_moneda_interp = -1.0
+        self.recompensa_dash_interp = -1.0
+        self.recompensa_tirador_interp = 1.0
+        self.recompensa_bombardeador_interp = -1.0
+
+        self.calcular_coeficientes_interp()
+
+        self.step_recompensa = 0.1
+        self.multiplicador = 1 / self.step_recompensa
+
+        self.monedas_recogidas = 0
+        self.monedas_max = 0
+
+        # self.iteracion = 0
+        self.id = np.random.randint(0, np.iinfo(np.int32).max)
+        self.semillas = {}
 
         # self.acciones = {
         #     0: [0, 0, 0, 0],
@@ -99,6 +135,8 @@ class Juego(gym.Env):
             6: [0, 0, 0, 1]
         }
 
+        self.actualizar_coeficientes()
+
     @property
     def jugador(self):
         return self.nivel.jugador.sprite
@@ -106,12 +144,13 @@ class Juego(gym.Env):
     def step(self, action):
         action = self.procesar_accion(action)
         self.nivel.update()
-        self.nivel.jugador.update(action)
+        self.jugador.update(action)
 
         self.actualizar_observaciones()
         self.actualizar_recompensas()
 
-        self.done = not self.nivel.jugador.sprite.activo
+        jugador = self.jugador
+        self.done = not jugador.activo or jugador.frames_misma_pos > 600 or jugador.pos.x >= self.x_final
 
         # if not self.nivel.jugador.sprite.activo:
         #     print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
@@ -119,7 +158,7 @@ class Juego(gym.Env):
         #     self.reset()
         #     return info_step
 
-        return self.observaciones, self.recompensa_step, not self.nivel.jugador.sprite.activo, {}
+        return self.observaciones_array, self.recompensa_step, self.done, {}
 
     def render(self, mode="human"):
         if self.flag_iniciar_render:
@@ -134,6 +173,10 @@ class Juego(gym.Env):
             self.camara.scroll()
 
         self.nivel.draw(self.ventana, self.camara.offset)
+        pygame.draw.line(self.ventana, 'white', (self.x_checkpoint - self.camara.offset.x, 0),
+                         (self.x_checkpoint - self.camara.offset.x, 700))
+        pygame.draw.line(self.ventana, 'green', (self.x_final-self.camara.offset.x, 0), (self.x_final-self.camara.offset.x, 700))
+
 
         # pygame.draw.line(self.ventana, 'red', (ANCHO/2, 0), (ANCHO/2, ALTO))
         # pygame.draw.line(self.ventana, 'red', (ANCHO / 3, 0), (ANCHO / 3, ALTO))
@@ -141,11 +184,41 @@ class Juego(gym.Env):
         pygame.display.update()
 
     def reset(self):
-        print(f"Metros avanzados: {self.nivel.jugador.sprite.pos.x}")
-        print()
+        jugador = self.jugador
+        print(f"Metros avanzados: {jugador.pos.x}/{self.x_final}")
+        print(f"Bloques avanzados: {jugador.pos.x/self.nivel.tam_bloque:.1f}/{self.bloque_final}")
+        print(f"Coeficientes: a={self.recompensa_avanzar} m={self.recompensa_moneda} d={self.recompensa_dash} t={self.recompensa_tirador} b={self.recompensa_bombardeador}")
+        print(f"Recompensa total: {self.recompensa_total}")
+        print(f"Monedas recogidas: {self.monedas_recogidas}/{self.monedas_max}")
+        print(f"Nivel pasado: {jugador.pos.x >= self.x_final and not self.caida_libre}\n")
 
+        print(f"ID: {self.id}")
+        self.monedas_recogidas = 0
+
+        if self.semillas.get(self.nivel.semilla):
+            self.semillas[self.nivel.semilla] += 1
+        else:
+            self.semillas[self.nivel.semilla] = 1
+
+        # self.iteracion += 1
+        # if self.iteracion % 100 == 0:
+        #     with open(f"Semillas{self.id}.txt", 'w') as f:
+        #         f.write(str(self.semillas))
+
+        self.caida_libre = False
         self.flag_reset = True
+        self.recompensa_total = 0
+        self.recompensa_step = 0
+        self.actualizar_coeficientes()
         self.nivel.reset()
+
+        self.monedas_max = 0
+        for m in self.nivel.chunks["monedas"][0]:
+            if m.pos.x < self.bloque_final * self.nivel.tam_bloque:
+                self.monedas_max += 1
+        self.recompensa_max = self.monedas_max
+        # print("Monedas max", self.monedas_max)
+        # print("Monedas chunk", len(self.nivel.chunks["monedas"][0]))
 
         # self.enemigos.add(EnemigoDeambulante(pygame.Vector2(64*12, 0), self.nivel, self))
         # self.enemigos.add(EnemigoSaltarin(pygame.Vector2(64 * 14 + 32, -64*40), self.nivel, self))
@@ -153,9 +226,14 @@ class Juego(gym.Env):
 
         self.actualizar_observaciones()
 
-        self.x_checkpoint = self.nivel.jugador.sprite.pos.x + self.nivel.tam_bloque * 6
+        self.x_checkpoint = self.nivel.tam_bloque * 1
 
-        return self.observaciones
+        return self.observaciones_array
+
+    # def close(self):
+    #     super().close()
+    #     with open(f"Semillas{self.id}.txt", 'w') as f:
+    #         f.write(str(self.semillas))
 
     def iniciar_render(self):
         self.flag_iniciar_render = False
@@ -173,39 +251,24 @@ class Juego(gym.Env):
         self.observaciones.append(np.interp(j.velocidad.x, [-Jugador.VELOCIDAD_DASH, Jugador.VELOCIDAD_DASH], [-1.0, 1.0]))
         self.observaciones.append(np.interp(j.velocidad.y if not j.en_suelo else 0.0, [Jugador.VELOCIDAD_SALTO, 0, Jugador.VELOCIDAD_TERMINAL], [-1.0, 0.0, 1.0]))
         self.observaciones.append(float(j.orientacion))
-        self.observaciones.append(np.interp(self.x_checkpoint - j.pos.x, [0, 384, 384*3], [1.0, 0.0, -1.0]))
+        self.observaciones.append(np.interp(j.pos.x, [0.0, self.x_final], [-1.0, 1.0]))
+        # self.observaciones.append(np.interp(self.x_checkpoint - j.pos.x, [0, 64, 64*3], [1.0, 0.0, -1.0]))  # 64 * 6 = 384, 384 * 3
         self.observaciones.append(1.0 if j.puede_saltar else -1.0)
         self.observaciones.append(1.0 if j.puede_doble_saltar else -1.0)
         self.observaciones.append(1.0 if j.puede_disparar else -1.0)
         self.observaciones.append(1.0 if j.puede_dashear else -1.0)
         self.observaciones.append(1.0 if j.animacion_activa else -1.0)
+        self.observaciones.append(self.recompensa_avanzar_interp)
+        self.observaciones.append(self.recompensa_moneda_interp)
+        self.observaciones.append(self.recompensa_dash_interp)
+        self.observaciones.append(self.recompensa_tirador_interp)
+        self.observaciones.append(self.recompensa_bombardeador_interp)
+
+        self.observaciones_array = np.array(self.observaciones)
 
     def actualizar_recompensas(self):
-        self.recompensa_step = 0
+        self.recompensa_step = 0.0
         jugador = self.jugador
-
-        # RECOMPENSAS
-        # Avanzar 64 * 6 metros recompensa 15 puntos
-        if jugador.pos.x >= self.x_checkpoint:
-            self.x_checkpoint = jugador.pos.x + self.nivel.tam_bloque * 6
-            self.recompensa_step += 10.0
-
-        # Recoger una moneda recompensa 1 por moneda
-        self.recompensa_step += jugador.monedas_recogidas_frame * 1.0
-
-        # Matar a un enemigo haciendo (de cualquier manera) recompensa con 5 puntos
-        self.recompensa_step += jugador.asesinatos_frame * 5.0
-
-        # PENALIZACIONES
-        # Disparar sin ningún motivo (no hay enemigos a la vista)
-        enemigos_en_vista = False
-        if jugador.ha_disparado:
-            for r in jugador.rayos:
-                if r.objeto_impactado == 3 or r.objeto_impactado == 4:
-                    enemigos_en_vista = True
-                    break
-            if not enemigos_en_vista:
-                self.recompensa_step -= 0.5
 
         # Caer al vacío
         caida_libre = True
@@ -213,26 +276,96 @@ class Juego(gym.Env):
             if r.rayo_bajo and (r.objeto_impactado == 1 or r.objeto_impactado == 2 or r.objeto_impactado == 5):
                 caida_libre = False
                 break
-        if caida_libre:
-            self.recompensa_step -= 0.5
+        self.caida_libre = caida_libre
+
+        # RECOMPENSAS
+        # Avanzar 64 * 6 metros recompensa 1.0 puntos
+        if jugador.pos.x >= self.x_checkpoint and not caida_libre:
+            # self.x_checkpoint = jugador.pos.x + self.nivel.tam_bloque * 1  # 6
+            self.x_checkpoint += self.nivel.tam_bloque * 1  # 6
+            self.recompensa_step += self.recompensa_avanzar
+
+        # if jugador.pos.x >= self.x_final and not caida_libre:
+        #     self.recompensa_step += 5.0
+
+        # if caida_libre:
+        #     self.recompensa_step = -0.1
+
+        # Recoger una moneda recompensa 1 por moneda
+        self.monedas_recogidas += jugador.monedas_recogidas_frame
+        if jugador.monedas_recogidas_frame:
+            self.recompensa_step += self.recompensa_moneda
+
+        # Matar a un enemigo haciendo (de cualquier manera) recompensa con 5 puntos
+        if jugador.asesinatos_dash_frame:
+            self.recompensa_step += self.recompensa_dash
+        if jugador.asesinatos_tiro_horizontal_frame:
+            jugador.asesinatos_tiro_horizontal_frame = 0
+            self.recompensa_step += self.recompensa_tirador
+        if jugador.asesinatos_tiro_vertical_frame:
+            jugador.asesinatos_tiro_vertical_frame = 0
+            self.recompensa_step += self.recompensa_bombardeador
+
+
+        # PENALIZACIONES
+        # # Disparar sin ningún motivo (no hay enemigos a la vista)
+        # enemigos_en_vista = False
+        # if jugador.ha_disparado:
+        #     for r in jugador.rayos:
+        #         if r.objeto_impactado == 3 or r.objeto_impactado == 4:
+        #             enemigos_en_vista = True
+        #             break
+        #     if not enemigos_en_vista:
+        #         self.recompensa_step -= 0.5
+        #
+        # # Caer al vacío
+        # caida_libre = True
+        # for r in jugador.rayos:
+        #     if r.rayo_bajo and (r.objeto_impactado == 1 or r.objeto_impactado == 2 or r.objeto_impactado == 5):
+        #         caida_libre = False
+        #         break
+        # if caida_libre:
+        #     self.recompensa_step -= 0.5
 
         # Morir por un disparo enemigo penaliza 5 puntos
         if jugador.disparado:
-            self.recompensa_step -= 2.0
+            self.recompensa_step = -1.0
 
         # Morir por contacto con un enemigo penaliza 10 puntos
         if jugador.asesinado:
-            self.recompensa_step -= 2.0
+            self.recompensa_step = -1.0
 
         # Morir por caída o por pisar pinchos penaliza 20 puntos
         if jugador.fuera_limites or jugador.pinchado:
-            self.recompensa_step -= 2.0
+            self.recompensa_step = -1.0
+
+        if jugador.frames_misma_pos > 600:
+            self.recompensa_step = -1.0
 
         self.recompensa_total += self.recompensa_step
 
     def procesar_accion(self, accion):
         return accion if self.juega_humano else self.acciones[accion]
 
+    def actualizar_coeficientes(self):
+        self.recompensa_avanzar = self.actualizar_coeficiente(self.rango_recompensa_avanzar)
+        self.recompensa_moneda = self.actualizar_coeficiente(self.rango_recompensa_moneda)
+        self.recompensa_dash = self.actualizar_coeficiente(self.rango_recompensa_dash)
+        self.recompensa_tirador = self.actualizar_coeficiente(self.rango_recompensa_tirador)
+        self.recompensa_bombardeador = self.actualizar_coeficiente(self.rango_recompensa_bombardeador)
+        self.calcular_coeficientes_interp()
+
+    def actualizar_coeficiente(self, rango: list) -> float:
+        inf, sup = rango[0], rango[1]
+        return np.random.randint(inf*self.multiplicador, sup*self.multiplicador+1)/self.multiplicador
+
+    def calcular_coeficientes_interp(self):
+        self.recompensa_avanzar_interp = np.interp(self.recompensa_avanzar, self.rango_recompensa_avanzar, [-1.0, 1.0])
+        self.recompensa_moneda_interp = np.interp(self.recompensa_moneda, self.rango_recompensa_moneda, [-1.0, 1.0])
+        self.recompensa_dash_interp = np.interp(self.recompensa_dash, self.rango_recompensa_dash, [-1.0, 1.0])
+        self.recompensa_tirador_interp = np.interp(self.recompensa_tirador, self.rango_recompensa_tirador, [-1.0, 1.0])
+        self.recompensa_bombardeador_interp = np.interp(self.recompensa_bombardeador,
+                                                        self.rango_recompensa_bombardeador, [-1.0, 1.0])
 
 class Nivel:
     def __init__(self):
@@ -256,7 +389,7 @@ class Nivel:
 
         self.ultima_x = 0
         self.ultima_y = 0
-        self.step_generacion = 0  # 10 * tam_bloque
+        self.step_generacion = 20 * self.tam_bloque
 
         self.datos_nivel = []
 
@@ -269,6 +402,12 @@ class Nivel:
         self.reset()
 
     def generar_nivel(self):
+        def coinciden_bloques(s: Sprite, g: list[Sprite]) -> bool:
+            for s2 in g:
+                if pygame.sprite.collide_rect(s, s2):
+                    return True
+            return False
+
         tam_bloque = 64
         y_min, y_max = self.min_y, self.max_y
         y_actual = self.ultima_y
@@ -285,7 +424,7 @@ class Nivel:
         monedas = []
         enemigos = []
 
-        for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 1, tam_bloque):
+        for x in range(self.ultima_x, self.ultima_x + self.step_generacion + 0, tam_bloque):
             # x = x * tam_bloque
             if np.random.random() < 0.9 or x <= self.zona_seguridad:  # 80% de suelo, 20% de vacío
                 if bloques_restantes <= 0:
@@ -306,8 +445,9 @@ class Nivel:
                     bloques_restantes = ancho_plataforma
 
                 bloque = Bloque(pygame.Vector2(x, y_actual * tam_bloque), tam_bloque + 1)
-                bloques.append(bloque)
-                self.bloques.add(bloque)
+                if not coinciden_bloques(bloque, monedas):
+                    bloques.append(bloque)
+                    self.bloques.add(bloque)
 
                 if np.random.random() < 0.05 and x > self.zona_seguridad:
                     enemigo = EnemigoSaltarin(pygame.Vector2(bloque.rect.centerx, bloque.rect.top - EnemigoSaltarin.DIMENSION[1]), self, 1 if np.random.random() < 0.5 else -1)
@@ -327,20 +467,23 @@ class Nivel:
                 if np.random.random() < 0.05:
                     moneda = Moneda(pygame.Vector2(x + tam_bloque / 2 - Moneda.TAM / 2,
                                                            (y_actual-y) * tam_bloque - tam_bloque / 2 - Moneda.TAM / 2))
-                    monedas.append(moneda)
-                    self.monedas.add(moneda)
+                    if not coinciden_bloques(moneda, bloques):
+                        monedas.append(moneda)
+                        self.monedas.add(moneda)
             if np.random.random() < 0.05:
                 y_plat = np.clip(np.random.randint(y_actual - dec_altura, y_actual - 3 + 1), y_min, y_max)
                 anchura = np.random.randint(3, 6)
                 for i in range(1, anchura):
                     bloque = Bloque(pygame.Vector2(x+i*tam_bloque, y_plat * tam_bloque), tam_bloque + 1)  # 'yellow'
-                    bloques.append(bloque)
-                    self.bloques.add(bloque)
+                    if not coinciden_bloques(bloque, monedas):
+                        bloques.append(bloque)
+                        self.bloques.add(bloque)
                     for y in range(np.random.randint(1, 4)):
                         if np.random.random() < 0.5:
                             moneda = Moneda(pygame.Vector2((x+i*tam_bloque)+tam_bloque/2-Moneda.TAM/2, (y_plat-y)*tam_bloque-tam_bloque/2-Moneda.TAM/2))
-                            monedas.append(moneda)
-                            self.monedas.add(moneda)
+                            if not coinciden_bloques(moneda, bloques):
+                                monedas.append(moneda)
+                                self.monedas.add(moneda)
 
             self.ultima_y = y_actual
             bloques_restantes -= 1
@@ -354,7 +497,7 @@ class Nivel:
         self.disparos.update()
         self.enemigos.update()
         x_jugador = self.jugador.sprite.pos.x
-        if self.ultima_x - x_jugador < 64 * 14:
+        if self.ultima_x - x_jugador < 64 * 20:
             self.generar_nivel()
             if len(self.chunks["bloques"]) > 4:
                 bloques = self.chunks["bloques"].pop(0)
@@ -386,49 +529,47 @@ class Nivel:
         np.random.seed(semilla)
         self.semilla = semilla
 
-        datos_nivel = [
-            "                         ",
-            "        X              XX",
-            "                        X",
-            "                XXX     X",
-            "            X           X",
-            "    XXXXX              X",
-            "                     XX",
-            "                    X",
-            "XXXXX  XXXXX    XXXX",
-            "XXX XXXXXXXX  XXXXXX",
-            "XX XXXXXXXXX  XXXXXX"
-        ]
-
-        datos_nivel = [
-            "        X    ...       XX.",
-            "             ...       .X.",
-            "                XXX     X",
-            "     ...    X           X",
-            "    XXXXX              X",
-            "             .       XX",
-            "             .      X",
-            "XXXXX  XXXX    XX  X",
-            "XXX.XX         X  XX",
-            "XX      XXXX.     XX",
-            "XXXXXXXXXXXX. XXXXXX"
-        ]
-
-        datos_nivel = [
-            "        X    ...       XX.",
-            "             ...       .X.",
-            "X               XXX     X",
-            "X    ...    X           X",
-            " X  XXXXX              X",
-            "  X          .       XX",
-            "   X         .      X",
-            "XXXXX  XXXX  XXXXXXX",
-            "XXX.XX      X  X  XX",
-            "XX      XXXX.     XX",
-            "XXXXXXXXXXXX. XXXXXX"
-        ]
-
-        tam_bloque = 64
+        # datos_nivel = [
+        #     "                         ",
+        #     "        X              XX",
+        #     "                        X",
+        #     "                XXX     X",
+        #     "            X           X",
+        #     "    XXXXX              X",
+        #     "                     XX",
+        #     "                    X",
+        #     "XXXXX  XXXXX    XXXX",
+        #     "XXX XXXXXXXX  XXXXXX",
+        #     "XX XXXXXXXXX  XXXXXX"
+        # ]
+        #
+        # datos_nivel = [
+        #     "        X    ...       XX.",
+        #     "             ...       .X.",
+        #     "                XXX     X",
+        #     "     ...    X           X",
+        #     "    XXXXX              X",
+        #     "             .       XX",
+        #     "             .      X",
+        #     "XXXXX  XXXX    XX  X",
+        #     "XXX.XX         X  XX",
+        #     "XX      XXXX.     XX",
+        #     "XXXXXXXXXXXX. XXXXXX"
+        # ]
+        #
+        # datos_nivel = [
+        #     "        X    ...       XX.",
+        #     "             ...       .X.",
+        #     "X               XXX     X",
+        #     "X    ...    X           X",
+        #     " X  XXXXX              X",
+        #     "  X          .       XX",
+        #     "   X         .      X",
+        #     "XXXXX  XXXX  XXXXXXX",
+        #     "XXX.XX      X  X  XX",
+        #     "XX      XXXX.     XX",
+        #     "XXXXXXXXXXXX. XXXXXX"
+        # ]
 
         # for fila_i, fila in enumerate(datos_nivel):
         #     for col_i, celda in enumerate(fila):
@@ -445,16 +586,19 @@ class Nivel:
         self.ultima_x = 0
         self.ultima_y = np.random.randint(self.min_y, self.max_y)
         print(f"Altura inicial: {self.ultima_y}")
-        self.step_generacion = 10 * tam_bloque
 
         self.generar_nivel()
+        # self.generar_nivel()
 
         bloque_seguro = self.chunks["bloques"][0][0]
-        self.jugador.sprite.reset()
-        self.jugador.sprite.pos.update(bloque_seguro.rect.centerx, bloque_seguro.rect.top)
 
-        self.datos_nivel = datos_nivel
-        self.tam_bloque = tam_bloque
+        jugador = self.jugador.sprite
+        jugador.pos.update(bloque_seguro.rect.centerx, bloque_seguro.rect.top-jugador.DIMENSION[1])
+        jugador.rect.x = round(jugador.pos.x)  # bloque_seguro.rect.centerx
+        jugador.rect.y = round(jugador.pos.y)  # bloque_seguro.rect.top  bottom
+        self.jugador.sprite.reset()
+        # self.datos_nivel = datos_nivel
+        # self.tam_bloque = tam_bloque
 
         # self.monedas.empty()
         # for fila_i, fila in enumerate(datos_nivel):
@@ -467,9 +611,10 @@ class Nivel:
     def draw(self, ventana, offset):
         self.disparos.draw(ventana, offset)
         self.enemigos.draw(ventana, offset)
-        self.monedas.draw(ventana, offset)
+
         self.bloques.draw(ventana, offset)
         self.pinchos.draw(ventana, offset)
+        self.monedas.draw(ventana, offset)
 
         if self.jugador.sprite.activo:
             self.jugador.draw(ventana, offset)
@@ -867,12 +1012,17 @@ class Jugador(Tirador):
         # self.rayos.extend([Rayo(self, ang) for ang in np.linspace(3*np.pi/2, np.pi/2, 19)])
         # self.rayos = [Rayo(self, ang) for ang in np.linspace(-np.pi/2, np.pi/2, 9)]
 
-        self.asesinatos_frame = 0
+        self.asesinatos_dash_frame = 0
+        self.asesinatos_tiro_horizontal_frame = 0
+        self.asesinatos_tiro_vertical_frame = 0
         self.monedas_recogidas_frame = 0
 
         self.en_suelo = True
         self.puede_saltar = self.puede_disparar = True
         self.puede_doble_saltar = self.puede_dashear = True
+
+        self.ultima_x = pos.x
+        self.frames_misma_pos = 0
 
     def kill(self) -> None:
         self.activo = False
@@ -885,17 +1035,21 @@ class Jugador(Tirador):
         self.dash_finalizado = False
         self.timer_cooldown_dash = 0
         self.timer_duracion_dash = 0
-        self.asesinatos_frame = 0
+        self.asesinatos_dash_frame = 0
+        self.asesinatos_tiro_horizontal_frame = 0
+        self.asesinatos_tiro_vertical_frame = 0
         self.monedas_recogidas_frame = 0
         self.en_suelo = True
-        self.puede_saltar = self.puede_disparar = True
-        self.puede_doble_saltar = self.puede_dashear = True
+        self.puede_saltar = self.puede_disparar = self.puede_dashear = True
+        self.puede_doble_saltar = False
+        self.ultima_x = self.pos.x
+        self.frames_misma_pos = 0
 
         for r in self.rayos:
             r.reset()
 
     def update(self, accion=None):
-        self.asesinatos_frame = 0
+        self.asesinatos_dash_frame = 0
         self.monedas_recogidas_frame = 0
         super().update(accion)
         for r in self.rayos:
@@ -910,6 +1064,12 @@ class Jugador(Tirador):
         self.puede_doble_saltar = self.saltando and not self.doble_salto
         self.puede_dashear = not self.dash_iniciado and self.timer_cooldown_dash <= 1
         self.puede_disparar = self.puede_disparar and not self.dash_iniciado
+
+        if abs(self.pos.x - self.ultima_x) < self.velocidad_x:
+            self.frames_misma_pos += 1
+        else:
+            self.frames_misma_pos = 0
+        self.ultima_x = self.pos.x
 
     def actualizar_timers(self):
         super().actualizar_timers()
@@ -987,7 +1147,7 @@ class Jugador(Tirador):
         enemigo = pygame.sprite.spritecollideany(self, self.nivel.enemigos)
         if enemigo:
             if self.dash_iniciado:
-                self.asesinatos_frame += 1
+                self.asesinatos_dash_frame += 1
                 enemigo.kill()
             else:
                 self.asesinado = True
@@ -1189,6 +1349,8 @@ class Disparo(Entidad):
             self.flag_colision_horizontal = True
             self.en_colision_horizontal(jugador, self.velocidad.x)
         elif self.grupo != self.nivel.enemigos and (enemigo := pygame.sprite.spritecollideany(self, self.nivel.enemigos)):
+            j: Jugador = self.grupo.sprites()[0]
+            j.asesinatos_tiro_horizontal_frame += 1
             self.flag_colision_horizontal = True
             self.en_colision_horizontal(enemigo, self.velocidad.x)
 
@@ -1198,6 +1360,8 @@ class Disparo(Entidad):
             self.flag_colision_horizontal = True
             self.en_colision_vertical(jugador, self.velocidad.y)
         elif self.grupo != self.nivel.enemigos and (enemigo := pygame.sprite.spritecollideany(self, self.nivel.enemigos)):
+            j: Jugador = self.grupo.sprites()[0]
+            j.asesinatos_tiro_vertical_frame += 1
             self.flag_colision_horizontal = True
             self.en_colision_vertical(enemigo, self.velocidad.y)
 
@@ -1234,7 +1398,7 @@ class Rayo:
 
     OBJETOS_INTERP = dict(zip(list(COLOR.keys()), np.interp(list(COLOR.keys()), [0, 8], [-1.0, 1.0])))
 
-    def __init__(self, entidad: Entidad, ang, longitud_maxima=25+64*14):
+    def __init__(self, entidad: Entidad, ang, longitud_maxima=64*14):  # 25+64*14
         self.entidad = entidad
         self.x1 = entidad.pos.x
         self.y1 = entidad.pos.y
@@ -1288,8 +1452,8 @@ class Rayo:
         objeto = None
         for bloque in (*self.entidad.nivel.pinchos, *self.entidad.nivel.bloques, *self.entidad.nivel.enemigos,
                        *self.entidad.nivel.monedas, *self.entidad.nivel.disparos):
-            if isinstance(bloque, Disparo) and bloque.grupo == bloque.nivel.jugador:
-                continue
+            # if isinstance(bloque, Disparo) and bloque.grupo == bloque.nivel.jugador:
+            #     continue
 
             b = bloque.rect
             dist_min_borde = 1
